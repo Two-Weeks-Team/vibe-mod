@@ -8,7 +8,7 @@
 ## TL;DR (10초 brief)
 
 - **무엇**: Reddit "Mod Tools and Migrated Apps Hackathon" — **Best New Mod Tool ($10K)** 트랙 출품작
-- **컨셉**: 모더레이터가 자연어로 룰을 쓰면 OpenAI gpt-5.4-nano가 결정론 JSON으로 컴파일, 24h shadow + dry-run preview + 30-day rollback
+- **컨셉**: 모더레이터가 자연어로 룰을 쓰면 OpenAI gpt-5.4-mini(기본)가 결정론 JSON으로 컴파일, 24h shadow + dry-run preview + 30-day rollback. LLM은 build-time only — 룰 평가 시 0 호출.
 - **마감**: **2026-05-27 18:00 PT (KST 5/28 10:00) — D-15**
 - **현재 상태**: 코드 산출물·문서·테스트 plan 모두 implementation-ready (audit 18건 패치 적용 완료). **사용자 본인이 Devvit wizard 진행할 차례** (CLI에서 자동화 불가).
 - **단일 진실의 원천**: `https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod-final-plan.html`
@@ -57,7 +57,7 @@ npx tsc --noEmit
 ```bash
 # 1) https://platform.openai.com/api-keys 에서 새 키 생성
 # 2) 일일 spending limit 설정 ($5 권장 for hackathon)
-# 3) gpt-5.4-nano 모델 권한 확인 (대부분 Tier 1+ 자동 부여)
+# 3) gpt-5.4-mini 모델 권한 + 계정 billing 활성 확인 (npm run openai:smoketest 로 검증)
 # 4) Devvit secret으로 저장:
 npx devvit settings set openaiApiKey
 # 프롬프트에서 sk-… 키 붙여넣기
@@ -126,7 +126,7 @@ npm run dev
 ├── src/
 │   ├── shared/
 │   │   ├── rule-schema.ts       (160줄, Zod v4 strict)
-│   │   ├── system-prompt.ts     (110줄, gpt-5.4-nano용)
+│   │   ├── system-prompt.ts     (110줄, gpt-5.4-mini/nano용 — FactPaths/액션을 프롬프트에 자동 주입)
 │   │   └── starter-rules.ts     (110줄, 5 seed rules — SAFE actions, shadow:true, onAppInstall에서 draft로 seed)
 │   └── server/
 │       ├── devvit-helpers.ts     (32줄, @devvit/web SDK 어댑터: getCurrentSubreddit{Name,Ref}, asT1/asT3)
@@ -136,11 +136,11 @@ npm run dev
 │       └── index.ts              (530줄, Hono routes + isCallerModerator guard, onAppInstall이 seedStarterRules() 호출)
 ├── scripts/
 │   ├── acceptance.ts            ← `npm run acceptance` — G1~G4 exit gate (config↔code · devvit.json schema/cron · tsc · vitest). 4/4 pass
-│   ├── devvit-doctor.ts         ← `npm run doctor` — 배포 전 프리플라이트 (devvit.json 정합성, fetch host↔permissions, route↔config 와이어링, node engine, login/app-id)
-│   └── replay.ts                ← `npm run replay fixtures/x.json` — 이벤트/폼을 로컬 Hono app에 in-memory 더블로 발사, 응답+redis diff+발생한 Reddit 호출 출력 (playtest 불필요)
-├── fixtures/
-│   ├── post-submit.json         ← replay 예제: 트리거 이벤트
-│   └── compose-rule-submit.json ← replay 예제: 폼 제출 (canned OpenAI 응답 포함)
+│   ├── devvit-doctor.ts         ← `npm run doctor` — 배포 전 프리플라이트 (devvit.json·fetch host↔permissions·route↔config·node engine·login/app-id)
+│   ├── openai-smoketest.ts      ← `npm run openai:smoketest` — 실제 OpenAI API로 프롬프트↔스키마↔모델 검증 (latency·토큰·`OPENAI_MODELS=a,b,c` 비교; `.env` 또는 `$OPENAI_API_KEY` 필요)
+│   └── replay.ts                ← `npm run replay fixtures/x.json` — 이벤트/폼을 로컬 Hono app에 in-memory 더블로 발사 (playtest 불필요)
+├── fixtures/                    ← replay 예제: post-submit.json (트리거) · compose-rule-submit.json (폼+canned OpenAI) · undo-action.json (rollback)
+├── .env.example                 ← `OPENAI_API_KEY` (→ `.env`로 복사, git-ignored; openai:smoketest 용. 배포 키는 별도 Devvit secret)
 ├── test/
 │   ├── devvit-testkit.ts        ← 재사용 가능한 Devvit 테스트 더블 (in-memory Redis, Reddit/Listing/settings/scheduler, fetch). 프로젝트 무관 — 다음 모드에 복사/패키지화 대상
 │   ├── setup.ts                 ← vitest setup (얇은 프로젝트 레이어: testkit 인스턴스화 + vi.mock + beforeEach 리셋)
@@ -155,7 +155,7 @@ npm run dev
     ├── tos.md                   ← Terms of Service
     └── privacy.md               ← Privacy Policy
 
-src/**/*.test.ts — 148 tests (vitest), 12 files:
+src/**/*.test.ts — 152 tests (vitest), 13 files (1 skipped = replay-runner):
   rule-schema · evaluator · executor · fact-bag · system-prompt · starter-rules
   + routes-compose / routes-dashboard / routes-undo / routes-triggers / routes-scheduler / routes-settings
   (routes-* = app.fetch() 호출 테스트 — 모든 Hono 라우트를 Devvit/OpenAI mock으로 실증)
@@ -188,12 +188,23 @@ git hooks (simple-git-hooks): pre-commit → lint-staged ;  pre-push → typeche
 - ✅ `replay-runner`: `redisHashes`/`redisZsets` fixture 필드 추가 (이전엔 string 키만 seed 가능) + replay용 generic thing stub. `fixtures/undo-action.json` 신규 (rollback 라운드트립 replay).
 - 152 tests pass (1 skipped). lint/format/tsc clean. acceptance 4/4.
 
+**세션 4 (2026-05-12) — OpenAI 실API 검증 + 모델/추론설정 튜닝 (PR #7~11)**:
+
+- ✅ `npm run openai:smoketest` 추가 — 실제 OpenAI API에 실제 시스템 프롬프트 + few-shot + 7 케이스(컴파일 5 / 모호 2)를 던져 `Rule.parse`로 검증. per-call latency · 토큰 · $ 추정 · `OPENAI_MODELS=a,b,c` 비교 테이블. (`npm run check`/CI엔 안 들어감 — 실키 필요.) `.env.example` 신규.
+- ✅ **버그(프로덕션)**: `callOpenAI()`가 `max_tokens` + `temperature` 보냄 → gpt-5.x는 `max_completion_tokens`만 받고 temperature 기본값만. 안 고쳤으면 **모든 compile이 400**. `max_completion_tokens: 600` + `temperature` 제거.
+- ✅ **추론설정**: 이 호출은 기계적 NL→JSON 번역이라 `reasoning_effort: 'none'` (gpt-5.4 계열 값 — 5.4는 `'minimal'` 거부) + `verbosity: 'low'` 추가. 측정: gpt-5.4-mini 중간값 ~1.2s / nano ~1.5s / 풀 5.4 ~2.1s, **셋 다 7/7**. gpt-5-mini는 `reasoning_effort: 'minimal'`이어야 7/7(아니면 3/7 — 토큰 truncation), 느려서 옵션 제외. gpt-5-nano/gpt-4.1-* 는 이 키에 권한 없음(403).
+- ✅ `devvit.json` `openaiModel` 옵션: `gpt-5.4-mini`(**기본**, 가장 빠름) / `gpt-5.4-nano`(가장 저렴) / `gpt-5.4`(풀 — 느림, 이득 없음, 비추천). `index.ts` fallback도 nano→mini.
+- ✅ **OpenAI 검증 결과: 통과.** 계정 billing 활성·모델 존재·`json_object` 준수·schema-valid 룰 생산·clarification 경로 모두 OK. compile당 ~1.3k in + ~0.1k out ≈ $0.0001 (사용자는 무료 데일리 티어라 사실상 0).
+- 데이터 공유: 무료 티어 = OpenAI "API I/O 공유" 프로그램. vibe-mod는 무해 — 모드 자연어 + 시스템 프롬프트만 보냄, Reddit 콘텐츠 안 보냄 (hard-lock #6). 공유되는 건 룰 텍스트 + 컴파일된 JSON.
+
 **아직 남음 (= 사용자 Devvit wizard 단계 + 이후)**:
 
-- `npm run dev` 실기 playtest로만 검증되는 gate (Compose 메뉴 렌더, OpenAI compile 라운드트립, undo 라운드트립) — acceptance/doctor 출력의 MANUAL/soft 섹션 참조
+- `npm run dev` 실기 playtest로만 검증되는 gate (Compose 메뉴 렌더, **Devvit 안에서** OpenAI compile 라운드트립, undo 라운드트립) — OpenAI 자체는 standalone으로 검증됨. acceptance/doctor 출력의 MANUAL/soft 섹션 참조
 - `.devvit-app-id` (wizard 생성) + `devvit build`로 SDK 정합화 최종 확인 (타입은 통과하나 실제 런타임 동작은 playtest 필요)
+- **`/internal/scheduler/dry-run-replay`는 v0.1에서 스텁(no-op)** — "dry-run preview" 헤드라인 기능의 실제 구현 필요 (rules:draft 읽어서 최근 N개 post에 evaluate → 시뮬레이션 audit 작성). Day 3 작업.
 - ToS + Privacy HTML로 export 후 갤러리 repo에 push (Devpost 제출 폼 URL용)
 - (선택) `Two-Weeks-Team/devvit-mod-template` — `docs/new-mod-checklist.md`의 인프라를 `gh repo create --template`용으로 분리. 인프라 파일은 vibe-mod에서 복사 가능하므로 급하진 않음.
+- (제품 관점, 해커톤 후) **fact 레이어 확장** — 현 closed `FactPaths`(~21개)로는 표현 못 하는 흔한 룰이 많음 (repost 감지, cross-sub 도배, 편집 여부, 계정 유사도, 언어 감지 등). 이게 AutoMod 대비 capability ceiling이 낮은 근본 원인. 평가 보고서 참조.
 
 ---
 
@@ -245,15 +256,17 @@ git hooks (simple-git-hooks): pre-commit → lint-staged ;  pre-push → typeche
 
 ---
 
-## 💵 비용 추정 (gpt-5.4-nano)
+## 💵 비용 (실측, 기본 모델 gpt-5.4-mini)
+
+`npm run openai:smoketest` 실측: 1 compile ≈ **~1.3k in + ~0.1k out 토큰** (이전 추정 ~800 in + 400 out보다 in이 큼 — few-shot 예시 + fact 추가 때문). list price 기준 ≈ **$0.0001/compile**.
 
 | 단위                                            | 비용         |
 | ----------------------------------------------- | ------------ |
-| 1 compile (~800 in + 400 out tokens)            | $0.00066     |
-| 1 sub × 50 compiles/day × 30일                  | ~$0.99/month |
-| 1,000 subs/month (full quota 사용 가정)         | ~$990/month  |
-| 1,000 subs/month (실제 평균 5 compiles/sub/day) | ~$99/month   |
+| 1 compile                                       | ~$0.0001     |
+| 1 sub × 50 compiles/day × 30일                  | ~$0.15/month |
+| 1,000 subs/month (실제 평균 5 compiles/sub/day) | ~$15/month   |
 
+**무료 데일리 티어**: OpenAI "API I/O 공유" 프로그램 가입 시 gpt-5.4-mini/nano 계열 10M tokens/day 무료 → 위 비용이 사실상 0. (현재 사용자 계정이 이 티어.)
 **BYOK 옵션**: `subredditOpenaiApiKey` (subreddit-scope) 설정 시 50/day 쿼터 우회. 모드가 본인 키 부담.
 
 ---
@@ -292,4 +305,4 @@ open https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod-fin
 ---
 
 작성: 2026-05-12 KST
-마지막 코드 변경: 2026-05-11 (OpenAI gpt-5.4-nano, Devvit 0.12.22, Zod 4.4.3 lock)
+마지막 코드 변경: 2026-05-12 (OpenAI gpt-5.4-mini 기본 + reasoning_effort:none, Devvit 0.12.22, Zod 4.4.3)
