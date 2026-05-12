@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: lint · typecheck · test · acceptance
+    name: lint · typecheck · test · acceptance · build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -42,3 +42,11 @@ jobs:
 
       - name: Acceptance gates (G1–G4)
         run: npm run acceptance
+
+      # Devvit Web server bundle (CJS → dist/server/index.cjs). `devvit upload`
+      # runs `vite build` (devvit.json scripts.build); fail CI if it can't bundle.
+      - name: Build server bundle (vite)
+        run: npx vite build
+
+      - name: Server bundle loads as CommonJS
+        run: node -e "require('./dist/server/index.cjs')"

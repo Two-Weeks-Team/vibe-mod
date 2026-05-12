@@ -24,8 +24,7 @@ import type {
   SettingsValidationRequest,
   SettingsValidationResponse,
 } from '@devvit/web/shared';
-import { reddit, settings, scheduler } from '@devvit/web/server';
-import { redis } from '@devvit/redis';
+import { reddit, redis, settings, scheduler, type TaskRequest, type TaskResponse } from '@devvit/web/server';
 import { RuleBundle, Rule, checkTreeDepth, type RuleBundleType, type RuleType } from '../shared/rule-schema';
 import { seedStarterRules } from '../shared/starter-rules';
 import { VIBE_MOD_SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from '../shared/system-prompt';
@@ -33,12 +32,6 @@ import { buildPostFactBag, buildCommentFactBag } from './fact-bag';
 import { selectMatchingRules } from './evaluator';
 import { executeActions, rollbackAction } from './executor';
 import { getCurrentSubredditName, getCurrentSubredditRef } from './devvit-helpers';
-
-// Scheduler task handlers receive `{ data?: JsonObject }` and may return any
-// JSON. `@devvit/web` doesn't export named Task request/response types, so we
-// keep these local aliases for readability.
-type TaskBody<T = Record<string, unknown>> = { data?: T };
-type TaskAck = { status: 'ok' };
 
 const app = new Hono();
 const COMPILE_RATE_LIMIT_PER_DAY = 50;
@@ -54,7 +47,7 @@ async function isCallerModerator(): Promise<boolean> {
   try {
     const user = await reddit.getCurrentUser();
     if (!user) return false;
-    const subredditName = await getCurrentSubredditName();
+    const subredditName = getCurrentSubredditName();
     if (!subredditName) return false;
 
     const cacheKey = `${subredditName}:modlist`;
@@ -128,7 +121,7 @@ app.post('/internal/menu/compose-rule', async (c) => {
     return c.json<UiResponse>({ showToast: { text: 'Only moderators can use this.', appearance: 'neutral' } });
   }
 
-  const subredditName = await getCurrentSubredditName();
+  const subredditName = getCurrentSubredditName();
   const dailyCount = Number((await redis.get(`${subredditName}:compile:count:${todayKey()}`)) ?? '0');
 
   return c.json<UiResponse>({
@@ -177,7 +170,7 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     return c.json<UiResponse>({ showToast: { text: 'Please type a rule.', appearance: 'neutral' } });
   }
 
-  const subredditName = await getCurrentSubredditName();
+  const subredditName = getCurrentSubredditName();
 
   // Rate limit (sub-scoped)
   const todayCounterKey = `${subredditName}:compile:count:${todayKey()}`;
@@ -347,7 +340,7 @@ app.post('/internal/menu/dashboard', async (c) => {
     return c.json<UiResponse>({ showToast: { text: 'Only moderators can use this.', appearance: 'neutral' } });
   }
 
-  const subredditName = await getCurrentSubredditName();
+  const subredditName = getCurrentSubredditName();
   const activeJson = await redis.get(`${subredditName}:rules:active`);
   const draftJson = await redis.get(`${subredditName}:rules:draft`);
   const active: RuleBundleType | null = activeJson ? JSON.parse(activeJson) : null;
@@ -392,7 +385,7 @@ app.post('/internal/form/dashboard-action', async (c) => {
   const { activate } = await c.req.json<{ activate: boolean }>();
   if (!activate) return c.json<UiResponse>({ showToast: 'No action taken.' });
 
-  const subredditName = await getCurrentSubredditName();
+  const subredditName = getCurrentSubredditName();
   const draftKey = `${subredditName}:rules:draft`;
   const draftJson = await redis.get(draftKey);
   if (!draftJson) return c.json<UiResponse>({ showToast: 'No draft to activate.' });
@@ -416,7 +409,7 @@ app.post('/internal/menu/undo-action', async (c) => {
   const { targetId } = await c.req.json<MenuItemRequest>();
   if (!targetId) return c.json<UiResponse>({ showToast: 'No target.' });
 
-  const subredditName = await getCurrentSubredditName();
+  const subredditName = getCurrentSubredditName();
   const auditKey = `${subredditName}:audit`;
   const recentIds = await redis.zRange(auditKey, 0, 99, { by: 'rank', reverse: true });
   let found: string | null = null;
@@ -445,7 +438,7 @@ app.post('/internal/menu/undo-action', async (c) => {
 // Triggers — with idempotency dedupe (audit Gap #5 fix)
 // ─────────────────────────────────────────────────────────────────────────────
 async function isDuplicateTrigger(trigger: string, thingId: string): Promise<boolean> {
-  const subName = await getCurrentSubredditName().catch(() => 'unknown');
+  const subName = getCurrentSubredditName();
   const dedupeKey = `${subName}:seen:${trigger}:${thingId}`;
   // Try-set-if-not-exists with TTL. If set, we just observed it for the first time.
   const txn = await redis.watch(dedupeKey);
@@ -481,7 +474,7 @@ app.post('/internal/trigger/on-post-submit', async (c) => {
       : undefined,
   });
 
-  const subredditName = await getCurrentSubredditName();
+  const subredditName = getCurrentSubredditName();
   const rulesJson = await redis.get(`${subredditName}:rules:active`);
   if (!rulesJson) return c.json<TriggerResponse>({ status: 'ok' });
 
@@ -522,7 +515,7 @@ app.post('/internal/trigger/on-comment-submit', async (c) => {
       : undefined,
   });
 
-  const subredditName = await getCurrentSubredditName();
+  const subredditName = getCurrentSubredditName();
   const rulesJson = await redis.get(`${subredditName}:rules:active`);
   if (!rulesJson) return c.json<TriggerResponse>({ status: 'ok' });
 
@@ -546,7 +539,7 @@ app.post('/internal/trigger/on-comment-submit', async (c) => {
 
 app.post('/internal/trigger/on-app-install', async (c) => {
   await c.req.json<OnAppInstallRequest>();
-  const subredditName = await getCurrentSubredditName();
+  const subredditName = getCurrentSubredditName();
 
   // Empty ACTIVE bundle — nothing fires until the mod promotes the draft.
   const emptyActive: RuleBundleType = {
@@ -590,8 +583,8 @@ app.post('/internal/trigger/on-comment-report', async (c) => {
 // Scheduler jobs
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/internal/scheduler/audit-retention', async (c) => {
-  await c.req.json<TaskBody>();
-  const subredditName = await getCurrentSubredditName();
+  await c.req.json<TaskRequest>();
+  const subredditName = getCurrentSubredditName();
   const auditKey = `${subredditName}:audit`;
   const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
@@ -602,24 +595,24 @@ app.post('/internal/scheduler/audit-retention', async (c) => {
   }
   // 2. Remove from ZSet
   await redis.zRemRangeByScore(auditKey, 0, cutoff);
-  return c.json<TaskAck>({ status: 'ok' });
+  return c.json<TaskResponse>({ status: 'ok' });
 });
 
 app.post('/internal/scheduler/dry-run-replay', async (c) => {
-  await c.req.json<TaskBody<{ ruleId: string; subredditName: string }>>();
+  await c.req.json<TaskRequest<{ ruleId: string; subredditName: string }>>();
   // v0.1: simplified — pull last 100 posts and log what would have happened.
   // Full implementation reads rules:draft, builds factBags, evaluates, writes simulated audits.
-  return c.json<TaskAck>({ status: 'ok' });
+  return c.json<TaskResponse>({ status: 'ok' });
 });
 
 app.post('/internal/scheduler/shadow-promote-check', async (c) => {
-  await c.req.json<TaskBody>();
-  const subredditName = await getCurrentSubredditName();
+  await c.req.json<TaskRequest>();
+  const subredditName = getCurrentSubredditName();
   const shadowHours = ((await settings.get('shadowDurationHours')) as number) ?? 24;
-  if (shadowHours <= 0) return c.json<TaskAck>({ status: 'ok' });
+  if (shadowHours <= 0) return c.json<TaskResponse>({ status: 'ok' });
 
   const activeJson = await redis.get(`${subredditName}:rules:active`);
-  if (!activeJson) return c.json<TaskAck>({ status: 'ok' });
+  if (!activeJson) return c.json<TaskResponse>({ status: 'ok' });
 
   const bundle = RuleBundle.parse(JSON.parse(activeJson));
   const now = Date.now();
@@ -633,12 +626,12 @@ app.post('/internal/scheduler/shadow-promote-check', async (c) => {
     }
   }
   if (changed) await redis.set(`${subredditName}:rules:active`, JSON.stringify(bundle));
-  return c.json<TaskAck>({ status: 'ok' });
+  return c.json<TaskResponse>({ status: 'ok' });
 });
 
 app.post('/internal/scheduler/rate-limit-circuit-breaker', async (c) => {
-  await c.req.json<TaskBody>();
-  const { id: subredditId, name: subredditName } = await getCurrentSubredditRef();
+  await c.req.json<TaskRequest>();
+  const { id: subredditId, name: subredditName } = getCurrentSubredditRef();
   const maxPerHour = ((await settings.get('maxActionsPerHour')) as number) ?? 100;
   const oneHourAgo = Date.now() - 3_600_000;
 
@@ -661,7 +654,7 @@ app.post('/internal/scheduler/rate-limit-circuit-breaker', async (c) => {
       console.warn('[vibe-mod] modmail send failed:', err);
     }
   }
-  return c.json<TaskAck>({ status: 'ok' });
+  return c.json<TaskResponse>({ status: 'ok' });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
