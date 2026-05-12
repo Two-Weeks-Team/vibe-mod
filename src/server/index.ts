@@ -723,8 +723,10 @@ async function callOpenAI(
       model,
       response_format: { type: 'json_object' },
       messages,
-      max_tokens: 700,
-      temperature: 0.1,
+      // Newer OpenAI models (gpt-5.x family) require max_completion_tokens (not max_tokens)
+      // and only accept the default temperature, so we don't send `temperature`. Determinism
+      // is carried by response_format: json_object + the strict prompt + few-shot examples.
+      max_completion_tokens: 700,
     }),
   });
 
