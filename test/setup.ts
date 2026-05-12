@@ -41,11 +41,21 @@ beforeEach(() => {
   fakeRedis.hashes.clear();
   fakeRedis.zsets.clear();
   vi.clearAllMocks();
+  // clearAllMocks only wipes call history — re-establish every default *implementation*
+  // here so a `.mockResolvedValue(...)` / `.mockImplementation(...)` in one test can't
+  // leak into the next. (getPostById/getCommentById have no factory default → mockReset.)
+  fakeReddit.getPostById.mockReset();
+  fakeReddit.getCommentById.mockReset();
   fakeReddit.getCurrentSubreddit.mockResolvedValue({ id: 't5_testsub', name: 'testsub' });
   fakeReddit.getCurrentUser.mockResolvedValue({ id: 't2_caller', username: 'caller' });
   fakeReddit.getUserByUsername.mockResolvedValue(null);
   fakeReddit.getUserKarmaFromCurrentSubreddit.mockResolvedValue({ fromComments: 0, fromPosts: 0 });
   fakeReddit.getModerators.mockResolvedValue({ all: async () => [] });
+  fakeReddit.report.mockResolvedValue({});
+  fakeReddit.setPostFlair.mockResolvedValue(undefined);
+  fakeReddit.banUser.mockResolvedValue(undefined);
+  fakeReddit.muteUser.mockResolvedValue(undefined);
+  fakeReddit.unbanUser.mockResolvedValue(undefined);
   fakeReddit.modMail.createModNotification.mockResolvedValue('modmail_conv_1');
   fakeScheduler.runJob.mockResolvedValue('job_1');
   fakeSettings.get.mockResolvedValue(undefined);

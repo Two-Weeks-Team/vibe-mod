@@ -48,7 +48,7 @@ const STARTER_RULE_SEEDS: readonly SeedRule[] = [
     on: ['onPostSubmit'],
     when: {
       all: [
-        { fact: 'content.upperCaseRatio', op: 'gt', value: 0.7 },
+        { fact: 'content.title.upperCaseRatio', op: 'gt', value: 0.7 },
         { fact: 'content.title.length', op: 'gte', value: 12 },
       ],
     },

@@ -39,10 +39,11 @@ export const FactPaths = [
   'content.length',
   'content.linkCount',
   'content.imageCount',
-  'content.upperCaseRatio',
+  'content.upperCaseRatio', // body's A–Z uppercase ratio (0 for link posts / empty bodies)
   'content.containsRegex', // requires .params.regex
   'content.title.length',
   'content.title.contains', // requires .params.needle
+  'content.title.upperCaseRatio', // title's A–Z uppercase ratio — the "ALL CAPS TITLE" signal
   'content.url', // full URL (post link)
   'content.urlDomain', // hostname only
 

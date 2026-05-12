@@ -66,6 +66,7 @@ describe('FEW_SHOT_EXAMPLES', () => {
       if (!('needsClarification' in ex.assistant)) continue;
       expect((ex.assistant.question ?? '').length).toBeGreaterThan(0);
       expect(Array.isArray(ex.assistant.suggestedAnswers)).toBe(true);
+      expect((ex.assistant.suggestedAnswers ?? []).length).toBeGreaterThan(0);
     }
   });
 });

@@ -36,6 +36,17 @@ describe('buildPostFactBag', () => {
     expect(bag['content.containsRegex']).toBe(POST.body);
   });
 
+  it('computes content.title.upperCaseRatio from the title, independent of the body', async () => {
+    const shouty = await buildPostFactBag({ ...POST, title: 'BUY MY COURSE NOW', body: 'a perfectly calm body' });
+    expect(shouty['content.title.upperCaseRatio']).toBe(1);
+    expect(shouty['content.upperCaseRatio']).toBeLessThan(0.2); // body ratio unaffected
+    const calm = await buildPostFactBag({ ...POST, title: 'a perfectly calm title', body: 'WHATEVER' });
+    expect(calm['content.title.upperCaseRatio']).toBe(0);
+    // numeric-only title → 0, not NaN
+    const numeric = await buildPostFactBag({ ...POST, title: '2024 results' });
+    expect(numeric['content.title.upperCaseRatio']).toBe(0);
+  });
+
   it('passes through subreddit context', async () => {
     const bag = await buildPostFactBag(POST);
     expect(bag['sub.weeklyActiveUsers']).toBe(1234);
