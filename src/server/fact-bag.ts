@@ -3,8 +3,7 @@
 // is either a constant from the event payload or a single Reddit API call
 // (with Redis caching). NEVER calls the LLM.
 
-import { reddit } from '@devvit/web/server';
-import { redis } from '@devvit/redis';
+import { reddit, redis } from '@devvit/web/server';
 import type { FactBag } from '../shared/rule-schema';
 import { getCurrentSubredditName } from './devvit-helpers';
 
@@ -133,7 +132,7 @@ const SAFE_AUTHOR_DEFAULTS: AuthorFacts = {
 async function getAuthorFacts(authorId: string, authorName: string): Promise<AuthorFacts> {
   // SECURITY: All Redis keys are sub-scoped. Devvit Redis is per-install,
   // but defense-in-depth — if Reddit changes the isolation model, we don't leak.
-  const subName = await getCurrentSubredditName().catch(() => 'unknown');
+  const subName = getCurrentSubredditName();
   const cacheKey = `${subName}:author:${authorId}`;
   const cached = await redis.get(cacheKey);
   if (cached) {
