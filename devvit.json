@@ -18,18 +18,22 @@
       },
       "openaiModel": {
         "type": "select",
-        "label": "OpenAI model (developer-set default)",
+        "label": "OpenAI model for rule compilation (reasoning_effort: none, verbosity: low)",
         "options": [
           {
-            "label": "gpt-5.4-nano (recommended — fast ~1.4s, cheapest, 7/7 on the rule-compile smoke test)",
+            "label": "gpt-5.4-mini (recommended — fastest ~1.1s, 7/7 on the rule-compile smoke test)",
+            "value": "gpt-5.4-mini"
+          },
+          {
+            "label": "gpt-5.4-nano (cheapest, ~1.4s, also 7/7)",
             "value": "gpt-5.4-nano"
           },
           {
-            "label": "gpt-5.4-mini (fast ~1.2s, equal quality, a bit pricier — pick this if cost is free for you)",
-            "value": "gpt-5.4-mini"
+            "label": "gpt-5.4 (full — slower ~1.8s, more cautious about ambiguous rules; no quality gain for this task)",
+            "value": "gpt-5.4"
           }
         ],
-        "defaultValue": "gpt-5.4-nano"
+        "defaultValue": "gpt-5.4-mini"
       }
     },
     "subreddit": {

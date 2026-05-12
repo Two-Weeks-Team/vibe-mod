@@ -294,7 +294,7 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
         schemaVersion: '1.0.0',
         bundleVersion: 0,
         compiledAt: Date.now(),
-        llmModel: ((await settings.get('openaiModel')) as string) || 'gpt-5.4-nano',
+        llmModel: ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini',
         llmTokensIn: 0,
         llmTokensOut: 0,
         rules: [],
@@ -700,7 +700,7 @@ async function callOpenAI(
   const apiKey = (subKey?.trim() || globalKey || '').trim();
   if (!apiKey) throw new Error('no_key');
 
-  const model = ((await settings.get('openaiModel')) as string) || 'gpt-5.4-nano';
+  const model = ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini';
 
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: VIBE_MOD_SYSTEM_PROMPT },
@@ -720,13 +720,20 @@ async function callOpenAI(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model,
+      model, // gpt-5.4-mini (default) / gpt-5.4-nano / gpt-5.4 — see devvit.json openaiModel
       response_format: { type: 'json_object' },
       messages,
-      // Newer OpenAI models (gpt-5.x family) require max_completion_tokens (not max_tokens)
-      // and only accept the default temperature, so we don't send `temperature`. Determinism
-      // is carried by response_format: json_object + the strict prompt + few-shot examples.
-      max_completion_tokens: 700,
+      // Tuned for what this call is: a mechanical NL → strict-JSON translation.
+      //   reasoning_effort: 'none'  — no hidden reasoning needed; keeps it fast and stops the
+      //                               token budget being eaten by reasoning (gpt-5.4 family value;
+      //                               older models call this 'minimal'). Measured ~1.1–1.4s.
+      //   verbosity: 'low'          — terse JSON, no commentary.
+      //   max_completion_tokens     — a compiled rule + a clarification fit well under 600.
+      //   (no `temperature` — the gpt-5.x family only accepts the default; max_tokens isn't
+      //    supported on these models, use max_completion_tokens.)
+      reasoning_effort: 'none',
+      verbosity: 'low',
+      max_completion_tokens: 600,
     }),
   });
 
