@@ -20,10 +20,14 @@
         "type": "select",
         "label": "OpenAI model (developer-set default)",
         "options": [
-          { "label": "gpt-5.4-nano (recommended — latest, cheapest, json_object support)", "value": "gpt-5.4-nano" },
-          { "label": "gpt-5.4-mini (latest, higher quality, ~7× more expensive)", "value": "gpt-5.4-mini" },
-          { "label": "gpt-5-mini (previous-gen, fallback)", "value": "gpt-5-mini" },
-          { "label": "gpt-5-nano (previous-gen, cheapest fallback)", "value": "gpt-5-nano" }
+          {
+            "label": "gpt-5.4-nano (recommended — fast ~1.4s, cheapest, 7/7 on the rule-compile smoke test)",
+            "value": "gpt-5.4-nano"
+          },
+          {
+            "label": "gpt-5.4-mini (fast ~1.2s, equal quality, a bit pricier — pick this if cost is free for you)",
+            "value": "gpt-5.4-mini"
+          }
         ],
         "defaultValue": "gpt-5.4-nano"
       }
