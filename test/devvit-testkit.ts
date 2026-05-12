@@ -159,6 +159,24 @@ export function makeFakeScheduler() {
   return { runJob: vi.fn(async (_job: unknown) => 'job_1') };
 }
 
+/**
+ * Mutable stand-in for `@devvit/web/server`'s request-scoped `context`
+ * (`subredditName`/`subredditId`/`postId`/`commentId`/`userId`/`appName`).
+ * Tests can mutate it (e.g. `fakeContext.postId = 't3_x'`) — `setup.ts` resets it each test.
+ */
+export function makeFakeContext(subName = 'testsub', subId = `t5_${subName}` as `t5_${string}`) {
+  return {
+    subredditId: subId,
+    subredditName: subName,
+    postId: undefined as `t3_${string}` | undefined,
+    commentId: undefined as `t1_${string}` | undefined,
+    userId: 't2_caller' as `t2_${string}` | undefined,
+    appName: 'vibe-mod',
+    metadata: {} as Record<string, unknown>,
+  };
+}
+export type FakeContext = ReturnType<typeof makeFakeContext>;
+
 // ──────────────────────────────────────────────────────────────────────────────
 // HTTP `fetch` double (for LLM / external API calls). Returns the mock so the
 // caller can `.mockResolvedValue(openaiResponse(...))` per test.
