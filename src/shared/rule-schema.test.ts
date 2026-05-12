@@ -35,9 +35,7 @@ describe('action verb constants', () => {
   });
 
   it('ACTION_VERBS is the union of safe + guarded', () => {
-    expect([...ACTION_VERBS].sort()).toEqual(
-      [...SAFE_ACTIONS, ...GUARDED_ACTIONS].sort(),
-    );
+    expect([...ACTION_VERBS].sort()).toEqual([...SAFE_ACTIONS, ...GUARDED_ACTIONS].sort());
   });
 
   it('locks the v0.1 whitelist exactly', () => {
@@ -64,9 +62,7 @@ describe('Rule schema', () => {
   });
 
   it('rejects an unknown action verb', () => {
-    expect(() =>
-      Rule.parse({ ...baseRule, then: [{ action: 'shadowban', params: {} }] }),
-    ).toThrow();
+    expect(() => Rule.parse({ ...baseRule, then: [{ action: 'shadowban', params: {} }] })).toThrow();
   });
 
   it('rejects an unknown fact path', () => {
@@ -122,15 +118,11 @@ describe('Rule schema', () => {
   });
 
   it('rejects an extra param on a lock action (.strict params)', () => {
-    expect(() =>
-      Rule.parse({ ...baseRule, then: [{ action: 'lock', params: { surprise: 1 } }] }),
-    ).toThrow();
+    expect(() => Rule.parse({ ...baseRule, then: [{ action: 'lock', params: { surprise: 1 } }] })).toThrow();
   });
 
   it('clamps mute duration to <=72 hours', () => {
-    expect(() =>
-      Rule.parse({ ...baseRule, then: [{ action: 'mute', params: { duration: 73 } }] }),
-    ).toThrow();
+    expect(() => Rule.parse({ ...baseRule, then: [{ action: 'mute', params: { duration: 73 } }] })).toThrow();
     const ok = Rule.parse({ ...baseRule, then: [{ action: 'mute', params: { duration: 72 } }] });
     expect(ok.then[0].action).toBe('mute');
   });

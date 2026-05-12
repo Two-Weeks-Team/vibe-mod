@@ -36,7 +36,11 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
   const upper = (p.body ?? '').replace(/[^A-Za-z]/g, '');
   const upperCaseRatio = upper.length === 0 ? 0 : (upper.match(/[A-Z]/g)?.length ?? 0) / upper.length;
   let urlDomain = '';
-  try { if (p.url) urlDomain = new URL(p.url).hostname; } catch { urlDomain = ''; }
+  try {
+    if (p.url) urlDomain = new URL(p.url).hostname;
+  } catch {
+    urlDomain = '';
+  }
 
   return {
     'author.accountAgeHours': a.accountAgeHours,
@@ -48,7 +52,7 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
 
     'content.length': p.body?.length ?? 0,
     'content.linkCount': links.length,
-    'content.imageCount': 0,                  // v0.2: parse media field
+    'content.imageCount': 0, // v0.2: parse media field
     'content.upperCaseRatio': upperCaseRatio,
     // content.containsRegex actually carries the post body so op:matches works.
     // (audit FIND-08 fix — previously always '')
@@ -62,7 +66,7 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
     'sub.over18': p.sub?.over18 ?? false,
 
     'reports.count': reportsCount,
-    'reports.distinctReporters': reportsCount,  // approximation; refined later
+    'reports.distinctReporters': reportsCount, // approximation; refined later
   };
 }
 
@@ -125,7 +129,11 @@ async function getAuthorFacts(authorId: string, authorName: string): Promise<Aut
   const cacheKey = `${subName}:author:${authorId}`;
   const cached = await redis.get(cacheKey);
   if (cached) {
-    try { return JSON.parse(cached); } catch { /* fall through */ }
+    try {
+      return JSON.parse(cached);
+    } catch {
+      /* fall through */
+    }
   }
 
   // SECURITY: catch all Reddit API errors so a flaky upstream doesn't kill the trigger.
@@ -147,7 +155,9 @@ async function getAuthorFacts(authorId: string, authorName: string): Promise<Aut
   try {
     const k = await reddit.getUserKarmaFromCurrentSubreddit(authorName);
     subKarma = (k?.fromComments ?? 0) + (k?.fromPosts ?? 0);
-  } catch { /* keep default 0 */ }
+  } catch {
+    /* keep default 0 */
+  }
 
   // Resolve mod status — read once per sub, cache for 5 min, lookup author in list.
   // Cached separately so we don't refetch the entire mod list every author hit.
@@ -162,18 +172,20 @@ async function getAuthorFacts(authorId: string, authorName: string): Promise<Aut
       const mods = await reddit.getModerators({ subredditName: subName });
       modUsernames = (await mods.all()).map((m: { username: string }) => m.username);
       await redis.set(modListKey, JSON.stringify(modUsernames));
-      await redis.expire(modListKey, 300);   // 5 min
+      await redis.expire(modListKey, 300); // 5 min
     }
     isModerator = modUsernames.includes(authorName);
-  } catch { /* keep default false */ }
+  } catch {
+    /* keep default false */
+  }
 
   const facts: AuthorFacts = {
     accountAgeHours,
     totalKarma: (user.linkKarma ?? 0) + (user.commentKarma ?? 0),
     subKarma,
     isModerator,
-    hasVerifiedEmail: false,   // Devvit API does not expose this; document as always-false
-    subJoinAgeHours: accountAgeHours,   // v0.2: query first-activity-in-sub for true value
+    hasVerifiedEmail: false, // Devvit API does not expose this; document as always-false
+    subJoinAgeHours: accountAgeHours, // v0.2: query first-activity-in-sub for true value
   };
 
   await redis.set(cacheKey, JSON.stringify(facts));

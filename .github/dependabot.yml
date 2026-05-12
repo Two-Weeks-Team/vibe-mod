@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps
+    groups:
+      # The Devvit SDK ships in lockstep across packages and moves fast — keep
+      # @devvit/* bumps in one reviewable PR so the API-drift surface is obvious.
+      devvit:
+        patterns: ['@devvit/*']
+      dev-dependencies:
+        dependency-type: development
+        patterns: ['*']
+        exclude-patterns: ['@devvit/*']
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci

@@ -1,0 +1,12 @@
+{
+  "route": "/internal/trigger/on-post-submit",
+  "redis": {
+    "testsub:rules:active": "{\"schemaVersion\":\"1.0.0\",\"bundleVersion\":1,\"compiledAt\":0,\"llmModel\":\"seed\",\"llmTokensIn\":0,\"llmTokensOut\":0,\"rules\":[{\"id\":\"r_low_karma\",\"name\":\"low karma to mod queue\",\"sourceNL\":\"send low-karma posts to the mod queue\",\"on\":[\"onPostSubmit\"],\"when\":{\"fact\":\"author.totalKarma\",\"op\":\"lt\",\"value\":50},\"then\":[{\"action\":\"modqueue\",\"params\":{\"note\":\"low-karma\"}}],\"enabled\":true,\"shadow\":false,\"createdAt\":0,\"createdBy\":\"t2_seed\"}]}"
+  },
+  "body": {
+    "type": "PostSubmit",
+    "post": { "id": "t3_demo1", "title": "buy my course", "selftext": "spam link", "url": "https://example.com" },
+    "author": { "id": "t2_newbie", "name": "newbie" },
+    "subreddit": { "subscribersCount": 1000, "nsfw": false }
+  }
+}

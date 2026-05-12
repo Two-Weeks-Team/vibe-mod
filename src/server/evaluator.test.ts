@@ -65,7 +65,9 @@ describe('evaluatePredicate — leaf operators', () => {
   });
 
   it('matches runs a regex against string facts', () => {
-    expect(evaluatePredicate({ fact: 'content.containsRegex', op: 'matches', value: 'discord\\.gg/\\w+' }, f)).toBe(true);
+    expect(evaluatePredicate({ fact: 'content.containsRegex', op: 'matches', value: 'discord\\.gg/\\w+' }, f)).toBe(
+      true,
+    );
     expect(evaluatePredicate({ fact: 'content.containsRegex', op: 'matches', value: 'telegram' }, f)).toBe(false);
   });
 
@@ -96,13 +98,23 @@ describe('evaluatePredicate — composites', () => {
   it('all = AND', () => {
     expect(
       evaluatePredicate(
-        { all: [{ fact: 'author.totalKarma', op: 'lt', value: 600 }, { fact: 'sub.over18', op: 'eq', value: false }] },
+        {
+          all: [
+            { fact: 'author.totalKarma', op: 'lt', value: 600 },
+            { fact: 'sub.over18', op: 'eq', value: false },
+          ],
+        },
         f,
       ),
     ).toBe(true);
     expect(
       evaluatePredicate(
-        { all: [{ fact: 'author.totalKarma', op: 'lt', value: 600 }, { fact: 'sub.over18', op: 'eq', value: true }] },
+        {
+          all: [
+            { fact: 'author.totalKarma', op: 'lt', value: 600 },
+            { fact: 'sub.over18', op: 'eq', value: true },
+          ],
+        },
         f,
       ),
     ).toBe(false);
@@ -111,7 +123,12 @@ describe('evaluatePredicate — composites', () => {
   it('any = OR', () => {
     expect(
       evaluatePredicate(
-        { any: [{ fact: 'sub.over18', op: 'eq', value: true }, { fact: 'content.length', op: 'gt', value: 0 }] },
+        {
+          any: [
+            { fact: 'sub.over18', op: 'eq', value: true },
+            { fact: 'content.length', op: 'gt', value: 0 },
+          ],
+        },
         f,
       ),
     ).toBe(true);
@@ -132,7 +149,12 @@ describe('evaluatePredicate — composites', () => {
         {
           all: [
             { not: { fact: 'author.isModerator', op: 'eq', value: true } },
-            { any: [{ fact: 'content.urlDomain', op: 'eq', value: 'discord.gg' }, { fact: 'content.linkCount', op: 'gte', value: 5 }] },
+            {
+              any: [
+                { fact: 'content.urlDomain', op: 'eq', value: 'discord.gg' },
+                { fact: 'content.linkCount', op: 'gte', value: 5 },
+              ],
+            },
           ],
         },
         f,
@@ -172,7 +194,11 @@ describe('selectMatchingRules', () => {
 
   it('skips rules whose predicate is false', () => {
     expect(
-      selectMatchingRules([rule({ when: { fact: 'author.totalKarma', op: 'gt', value: 1000 } as RuleType['when'] })], 'onPostSubmit', facts()),
+      selectMatchingRules(
+        [rule({ when: { fact: 'author.totalKarma', op: 'gt', value: 1000 } as RuleType['when'] })],
+        'onPostSubmit',
+        facts(),
+      ),
     ).toHaveLength(0);
   });
 
