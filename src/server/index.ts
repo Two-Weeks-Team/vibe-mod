@@ -354,10 +354,27 @@ app.post('/internal/menu/dashboard', async (c) => {
     recent.push({ ...h, id: String(m.member) });
   }
 
+  // Dry-run results for the draft rules (written by /internal/scheduler/dry-run-replay).
+  const dryRunLines: string[] = [];
+  for (const r of draft?.rules ?? []) {
+    const raw = await redis.get(`${subredditName}:dryrun:${r.id}`);
+    if (!raw) continue;
+    const d = JSON.parse(raw) as DryRunResult;
+    if (d.status === 'ok') {
+      dryRunLines.push(
+        `  ${r.id}: would match ${d.matched.length}/${d.sampledPosts} recent post(s)` +
+          (d.matched.length ? ` → ${[...new Set(d.matched.flatMap((m) => m.would))].join(', ')}` : ''),
+      );
+    } else {
+      dryRunLines.push(`  ${r.id}: ${d.note ?? 'dry-run unavailable'}`);
+    }
+  }
+
   const summary = [
     `Active rules: ${active?.rules.length ?? 0}`,
     `Draft rules: ${draft?.rules.length ?? 0}`,
     `Recent actions: ${recent.length}`,
+    ...(dryRunLines.length ? ['', 'Dry-run preview (draft rules):', ...dryRunLines] : []),
     '',
     'Recent actions:',
     ...recent.slice(0, 10).map((r) => `  ${r.action} (${r.outcome}) — ${(r.ruleSourceNL ?? '').slice(0, 60)}…`),
@@ -598,10 +615,89 @@ app.post('/internal/scheduler/audit-retention', async (c) => {
   return c.json<TaskResponse>({ status: 'ok' });
 });
 
+// Dry-run preview (hard lock #3 — forced before Activate). When a rule is
+// compiled into the draft, this job runs immediately, replays the *last few
+// posts* through the draft rule (no actions taken — pure evaluation), and writes
+// a `${sub}:dryrun:${ruleId}` summary the Dashboard renders. v0.1 samples posts
+// only (no `getNewComments` in the SDK); a comment-only rule gets a "shadow-mode
+// it to see real comments" note.
+const DRY_RUN_SAMPLE = 10; // recent posts to replay (×~3 Reddit API calls each via the fact bag)
+const DRY_RUN_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+interface DryRunResult {
+  ruleId: string;
+  ruleSourceNL: string;
+  ranAt: number;
+  status: 'ok' | 'unavailable';
+  note?: string;
+  sampledPosts: number;
+  matched: Array<{ thingId: string; thingType: 'post'; authorName: string; would: string[] }>;
+}
+
 app.post('/internal/scheduler/dry-run-replay', async (c) => {
-  await c.req.json<TaskRequest<{ ruleId: string; subredditName: string }>>();
-  // v0.1: simplified — pull last 100 posts and log what would have happened.
-  // Full implementation reads rules:draft, builds factBags, evaluates, writes simulated audits.
+  const body = await c.req.json<TaskRequest<{ ruleId: string; subredditName: string }>>();
+  const ruleId = body.data?.ruleId;
+  const sub = getCurrentSubredditName();
+  if (!ruleId) return c.json<TaskResponse>({ status: 'ok' });
+
+  const result: DryRunResult = {
+    ruleId,
+    ruleSourceNL: '',
+    ranAt: Date.now(),
+    status: 'ok',
+    sampledPosts: 0,
+    matched: [],
+  };
+  try {
+    const draftJson = await redis.get(`${sub}:rules:draft`);
+    const rule = draftJson ? RuleBundle.parse(JSON.parse(draftJson)).rules.find((r) => r.id === ruleId) : undefined;
+    if (!rule) {
+      result.status = 'unavailable';
+      result.note = `Rule ${ruleId} is no longer in the draft.`;
+    } else {
+      result.ruleSourceNL = rule.sourceNL;
+      const postTrigger = rule.on.includes('onPostSubmit')
+        ? 'onPostSubmit'
+        : rule.on.includes('onPostReport')
+          ? 'onPostReport'
+          : null;
+      if (!postTrigger) {
+        result.status = 'unavailable';
+        result.note =
+          'This rule listens to comment events. v0.1 dry-run replays recent posts only — activate it (shadow mode is ON by default) to see how it behaves on real comments.';
+      } else {
+        const posts = await reddit.getNewPosts({ subredditName: sub, limit: DRY_RUN_SAMPLE }).all();
+        for (const p of posts) {
+          result.sampledPosts++;
+          const facts = await buildPostFactBag(
+            {
+              id: p.id,
+              title: p.title,
+              body: p.body ?? '',
+              url: p.url,
+              authorId: p.authorId ?? 't2_unknown',
+              authorName: p.authorName,
+            },
+            p.numberOfReports ?? 0,
+          );
+          if (selectMatchingRules([rule], postTrigger, facts).length > 0) {
+            result.matched.push({
+              thingId: p.id,
+              thingType: 'post',
+              authorName: p.authorName,
+              would: rule.then.map((a) => a.action),
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    result.status = 'unavailable';
+    result.note = `Dry-run replay couldn't complete (${String(err).slice(0, 120)}). Activate in shadow mode to observe live behaviour instead.`;
+  }
+
+  await redis.set(`${sub}:dryrun:${ruleId}`, JSON.stringify(result));
+  await redis.expire(`${sub}:dryrun:${ruleId}`, DRY_RUN_TTL_SECONDS);
   return c.json<TaskResponse>({ status: 'ok' });
 });
 
