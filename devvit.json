@@ -3,6 +3,7 @@
   "name": "vibe-mod",
   "version": "0.1.0",
   "server": { "entry": "dist/server/index.cjs" },
+  "marketingAssets": { "icon": "assets/icon.png" },
   "permissions": {
     "reddit": { "enable": true, "scope": "moderator" },
     "redis": true,
