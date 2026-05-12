@@ -81,7 +81,6 @@
   },
   "forms": {
     "ruleComposerForm": "/internal/form/compose-rule-submit",
-    "activateRuleForm": "/internal/form/activate-rule",
     "dashboardForm": "/internal/form/dashboard-action"
   },
   "triggers": {

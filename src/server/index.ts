@@ -22,6 +22,7 @@ import type {
 import { reddit, settings, scheduler } from '@devvit/web/server';
 import { redis } from '@devvit/redis';
 import { RuleBundle, Rule, checkTreeDepth, type RuleBundleType, type RuleType } from '../shared/rule-schema';
+import { seedStarterRules } from '../shared/starter-rules';
 import { VIBE_MOD_SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from '../shared/system-prompt';
 import { buildPostFactBag, buildCommentFactBag } from './fact-bag';
 import { selectMatchingRules } from './evaluator';
@@ -523,8 +524,8 @@ app.post('/internal/trigger/on-app-install', async (c) => {
   await c.req.json<OnAppInstallRequest>();
   const subredditName = await reddit.getCurrentSubredditName();
 
-  // Seed empty bundle (5 starter rules can be added by mods via Compose)
-  const starter: RuleBundleType = {
+  // Empty ACTIVE bundle — nothing fires until the mod promotes the draft.
+  const emptyActive: RuleBundleType = {
     schemaVersion: '1.0.0',
     bundleVersion: 1,
     compiledAt: Date.now(),
@@ -533,7 +534,16 @@ app.post('/internal/trigger/on-app-install', async (c) => {
     llmTokensOut: 0,
     rules: [],
   };
-  await redis.set(`${subredditName}:rules:active`, JSON.stringify(starter));
+  await redis.set(`${subredditName}:rules:active`, JSON.stringify(emptyActive));
+
+  // Seed 5 conservative starter rules as a DRAFT (shadow: true, SAFE actions
+  // only). They show up in the Dashboard as "Draft rules: 5"; the mod reviews
+  // and activates when ready — same Activate gate as any compiled rule.
+  // Don't clobber an existing draft on re-install.
+  const draftKey = `${subredditName}:rules:draft`;
+  if (!(await redis.get(draftKey))) {
+    await redis.set(draftKey, JSON.stringify(seedStarterRules(Date.now())));
+  }
   return c.json<TriggerResponse>({ status: 'ok' });
 });
 

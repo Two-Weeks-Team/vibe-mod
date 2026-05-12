@@ -125,20 +125,34 @@ npm run dev
 │   ├── shared/
 │   │   ├── rule-schema.ts       (160줄, Zod v4 strict)
 │   │   └── system-prompt.ts     (110줄, gpt-5.4-nano용)
+│   ├── shared/starter-rules.ts  (110줄, 5 seed rules — SAFE actions, shadow:true, onAppInstall에서 draft로 seed)
 │   └── server/
 │       ├── evaluator.ts          (75줄, pure deterministic)
 │       ├── fact-bag.ts           (180줄, sub-scoped Redis + safe defaults)
 │       ├── executor.ts           (260줄, action whitelist + audit + rollback)
-│       └── index.ts              (520줄, Hono routes + isCallerModerator guard)
+│       └── index.ts              (530줄, Hono routes + isCallerModerator guard, onAppInstall이 seedStarterRules() 호출)
+├── scripts/
+│   └── acceptance.ts            ← `npm run acceptance` — Day1~Day4 exit gate를 static+unit check로 (현재 4/4 pass)
+├── test/
+│   └── setup.ts                 ← vitest global setup: in-memory Redis + Devvit SDK mock
 └── docs/
     ├── README-vibe-mod.md       ← 2-door split + Fetch Domains 섹션
     ├── tos.md                   ← Terms of Service
     └── privacy.md               ← Privacy Policy
+
+src/**/*.test.ts — 95 unit/component tests (vitest), 6 files:
+  rule-schema · evaluator · executor · fact-bag · system-prompt · starter-rules
 ```
 
-**가까운 시일 내 추가 필요**:
-- `scripts/acceptance.ts` — Day-1~Day-4 exit gates를 runnable check로
-- `test/setup.ts` + 20개 unit/component test files
+**Day-1 세션(2026-05-12)에서 추가 완료**:
+- ✅ `scripts/acceptance.ts` — G1~G4 gate (config↔code 일관성, schema, vitest). `npm run acceptance` → 4/4.
+  - acceptance가 잡은 버그 1건 수정: `devvit.json`의 orphaned `activateRuleForm`(라우트 없음) 제거 — 활성화는 dashboardForm 경로 사용.
+- ✅ `test/setup.ts` + 6개 test 파일 (95 tests, 모두 pass)
+- ✅ `src/shared/starter-rules.ts` — 5 starter rules, `onAppInstall` 트리거가 draft로 seed (mod가 Dashboard에서 Activate)
+
+**아직 남음**:
+- `npm run dev` 실기 playtest로만 검증되는 gate (Compose 메뉴 렌더, OpenAI compile 라운드트립, undo 라운드트립) — acceptance 출력의 MANUAL 섹션 참조
+- 사전 `npx tsc --noEmit`은 Devvit SDK API surface drift로 다수 에러 (executor/fact-bag/index의 reddit.* 호출 시그니처 불일치) — vitest는 esbuild 트랜스파일이라 영향 없으나, build 전 별도 패스 필요
 - ToS + Privacy HTML로 export 후 갤러리 repo에 push (Devpost 제출 폼 URL용)
 - `.devvit-app-id` (wizard 생성)
 
