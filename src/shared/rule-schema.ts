@@ -20,7 +20,7 @@ import { z } from 'zod';
 export const SAFE_ACTIONS = ['report', 'flair', 'lock', 'modqueue', 'remove'] as const;
 export const GUARDED_ACTIONS = ['ban', 'mute', 'permaban'] as const;
 export const ACTION_VERBS = [...SAFE_ACTIONS, ...GUARDED_ACTIONS] as const;
-export type ActionVerb = typeof ACTION_VERBS[number];
+export type ActionVerb = (typeof ACTION_VERBS)[number];
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Fact bag — every fact the predicate tree can reference.
@@ -33,18 +33,18 @@ export const FactPaths = [
   'author.subKarma',
   'author.isModerator',
   'author.hasVerifiedEmail',
-  'author.subJoinAgeHours',     // estimated: time since first activity in this sub
+  'author.subJoinAgeHours', // estimated: time since first activity in this sub
 
   // Content (post or comment body)
   'content.length',
   'content.linkCount',
   'content.imageCount',
   'content.upperCaseRatio',
-  'content.containsRegex',       // requires .params.regex
+  'content.containsRegex', // requires .params.regex
   'content.title.length',
-  'content.title.contains',      // requires .params.needle
-  'content.url',                 // full URL (post link)
-  'content.urlDomain',           // hostname only
+  'content.title.contains', // requires .params.needle
+  'content.url', // full URL (post link)
+  'content.urlDomain', // hostname only
 
   // Subreddit context
   'sub.weeklyActiveUsers',
@@ -54,7 +54,7 @@ export const FactPaths = [
   'reports.count',
   'reports.distinctReporters',
 ] as const;
-export type FactPath = typeof FactPaths[number];
+export type FactPath = (typeof FactPaths)[number];
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Predicate operators — closed set
@@ -81,10 +81,20 @@ const MAX_TREE_DEPTH = 6;
 const PredicateTreeSchema: z.ZodType<PredicateTree> = z.lazy(() =>
   z.union([
     LeafPredicate,
-    z.object({ all: z.array(z.lazy(() => PredicateTreeSchema)).min(1).max(20) }),
-    z.object({ any: z.array(z.lazy(() => PredicateTreeSchema)).min(1).max(20) }),
+    z.object({
+      all: z
+        .array(z.lazy(() => PredicateTreeSchema))
+        .min(1)
+        .max(20),
+    }),
+    z.object({
+      any: z
+        .array(z.lazy(() => PredicateTreeSchema))
+        .min(1)
+        .max(20),
+    }),
     z.object({ not: z.lazy(() => PredicateTreeSchema) }),
-  ])
+  ]),
 );
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -129,53 +139,54 @@ const Action = z.discriminatedUnion('action', [
 // ──────────────────────────────────────────────────────────────────────────────
 // Triggers the rule listens to (subset of Devvit triggers vibe-mod handles)
 // ──────────────────────────────────────────────────────────────────────────────
-const RuleTrigger = z.enum([
-  'onPostSubmit',
-  'onCommentSubmit',
-  'onPostReport',
-  'onCommentReport',
-]);
+const RuleTrigger = z.enum(['onPostSubmit', 'onCommentSubmit', 'onPostReport', 'onCommentReport']);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Single rule
 // ──────────────────────────────────────────────────────────────────────────────
 // SECURITY: .strict() on all rule-level objects so the LLM cannot smuggle
 // additional fields past validation (audit Gap #1 fix).
-export const Rule = z.object({
-  id: z.string().regex(/^r_[a-z0-9_]{1,60}$/, 'id must match r_[a-z0-9_]{1,60}'),
-  name: z.string().min(1).max(80),
-  sourceNL: z.string().min(1).max(1000),     // mod's original English
-  on: z.array(RuleTrigger).min(1).max(4),
-  when: PredicateTreeSchema,
-  then: z.array(Action).min(1).max(5),
-  // Rate-limit per author (to prevent rule from spamming a single user)
-  rateLimit: z.object({
-    perAuthor: z.enum(['1/min', '1/hour', '1/day']).optional(),
-  }).optional(),
-  enabled: z.boolean().default(true),
-  shadow: z.boolean().default(true),         // default ON, mod must explicitly promote
-  createdAt: z.number().int().nonnegative(),
-  createdBy: z.string().regex(/^t2_[a-z0-9]+$/),
-}).strict();
+export const Rule = z
+  .object({
+    id: z.string().regex(/^r_[a-z0-9_]{1,60}$/, 'id must match r_[a-z0-9_]{1,60}'),
+    name: z.string().min(1).max(80),
+    sourceNL: z.string().min(1).max(1000), // mod's original English
+    on: z.array(RuleTrigger).min(1).max(4),
+    when: PredicateTreeSchema,
+    then: z.array(Action).min(1).max(5),
+    // Rate-limit per author (to prevent rule from spamming a single user)
+    rateLimit: z
+      .object({
+        perAuthor: z.enum(['1/min', '1/hour', '1/day']).optional(),
+      })
+      .optional(),
+    enabled: z.boolean().default(true),
+    shadow: z.boolean().default(true), // default ON, mod must explicitly promote
+    createdAt: z.number().int().nonnegative(),
+    createdBy: z.string().regex(/^t2_[a-z0-9]+$/),
+  })
+  .strict();
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Rule bundle — stored at rules:active and rules:draft in Redis
 // ──────────────────────────────────────────────────────────────────────────────
-export const RuleBundle = z.object({
-  schemaVersion: z.literal('1.0.0'),
-  bundleVersion: z.number().int().nonnegative(),
-  compiledAt: z.number().int(),
-  llmModel: z.string(),
-  llmTokensIn: z.number().int().nonnegative(),
-  llmTokensOut: z.number().int().nonnegative(),
-  rules: z.array(Rule).max(50),    // hard cap: 50 rules per sub
-}).strict();
+export const RuleBundle = z
+  .object({
+    schemaVersion: z.literal('1.0.0'),
+    bundleVersion: z.number().int().nonnegative(),
+    compiledAt: z.number().int(),
+    llmModel: z.string(),
+    llmTokensIn: z.number().int().nonnegative(),
+    llmTokensOut: z.number().int().nonnegative(),
+    rules: z.array(Rule).max(50), // hard cap: 50 rules per sub
+  })
+  .strict();
 
 // Predicate tree depth check — runs after schema validation
 export function checkTreeDepth(tree: PredicateTree, depth = 0): void {
   if (depth > MAX_TREE_DEPTH) throw new Error(`predicate tree too deep (>${MAX_TREE_DEPTH})`);
-  if ('all' in tree) tree.all.forEach(t => checkTreeDepth(t, depth + 1));
-  else if ('any' in tree) tree.any.forEach(t => checkTreeDepth(t, depth + 1));
+  if ('all' in tree) tree.all.forEach((t) => checkTreeDepth(t, depth + 1));
+  else if ('any' in tree) tree.any.forEach((t) => checkTreeDepth(t, depth + 1));
   else if ('not' in tree) checkTreeDepth(tree.not, depth + 1);
 }
 

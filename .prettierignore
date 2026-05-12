@@ -1,0 +1,10 @@
+node_modules
+dist
+build
+.devvit
+coverage
+package-lock.json
+docs/*.html
+# Markdown left to the author — Prettier bloats tables and rewraps prose.
+*.md
+**/*.md

@@ -21,8 +21,7 @@ const STARTER_RULE_SEEDS: readonly SeedRule[] = [
   {
     id: 'r_new_account_fast_post',
     name: 'New account, immediate post → mod queue',
-    sourceNL:
-      'If an account less than one day old makes a post, send it to the mod queue so we can take a look.',
+    sourceNL: 'If an account less than one day old makes a post, send it to the mod queue so we can take a look.',
     on: ['onPostSubmit'],
     when: { fact: 'author.accountAgeHours', op: 'lt', value: 24 },
     then: [{ action: 'modqueue', params: { note: 'new-account-post (<24h old)' } }],
@@ -31,8 +30,7 @@ const STARTER_RULE_SEEDS: readonly SeedRule[] = [
   {
     id: 'r_low_karma_link_drop',
     name: 'Low-karma account dropping several links → mod queue',
-    sourceNL:
-      'If a post has three or more links and the author has under 50 karma, flag it for the mod queue.',
+    sourceNL: 'If a post has three or more links and the author has under 50 karma, flag it for the mod queue.',
     on: ['onPostSubmit'],
     when: {
       all: [
@@ -92,8 +90,8 @@ const STARTER_RULE_SEEDS: readonly SeedRule[] = [
  * @param now epoch-ms timestamp to stamp on every rule + the bundle.
  */
 export function seedStarterRules(now: number = Date.now()): RuleBundleType {
-  const rules = STARTER_RULE_SEEDS.map((seed): RuleType =>
-    Rule.parse({ ...seed, createdAt: now, createdBy: SEED_ACTOR, enabled: true, shadow: true }),
+  const rules = STARTER_RULE_SEEDS.map(
+    (seed): RuleType => Rule.parse({ ...seed, createdAt: now, createdBy: SEED_ACTOR, enabled: true, shadow: true }),
   );
   return RuleBundle.parse({
     schemaVersion: '1.0.0',

@@ -8,25 +8,44 @@ import { fakeRedis, fakeReddit, fakeSettings } from '../../test/setup';
 import { Rule, RuleBundle, type RuleType } from '../shared/rule-schema';
 
 const call = (path: string, body: unknown = {}) =>
-  app.fetch(new Request(`http://localhost${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  }));
+  app.fetch(
+    new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
 
 function bundleWith(rule: Partial<RuleType>) {
   const r: RuleType = Rule.parse({
-    id: 'r_x', name: 'x', sourceNL: 'x', on: ['onPostSubmit'],
-    when: { fact: 'content.length', op: 'gt', value: 0 }, then: [{ action: 'lock', params: {} }],
-    createdAt: 0, createdBy: 't2_seed', enabled: true, shadow: true, ...rule,
+    id: 'r_x',
+    name: 'x',
+    sourceNL: 'x',
+    on: ['onPostSubmit'],
+    when: { fact: 'content.length', op: 'gt', value: 0 },
+    then: [{ action: 'lock', params: {} }],
+    createdAt: 0,
+    createdBy: 't2_seed',
+    enabled: true,
+    shadow: true,
+    ...rule,
   });
-  return RuleBundle.parse({ schemaVersion: '1.0.0', bundleVersion: 1, compiledAt: 0, llmModel: 'seed', llmTokensIn: 0, llmTokensOut: 0, rules: [r] });
+  return RuleBundle.parse({
+    schemaVersion: '1.0.0',
+    bundleVersion: 1,
+    compiledAt: 0,
+    llmModel: 'seed',
+    llmTokensIn: 0,
+    llmTokensOut: 0,
+    rules: [r],
+  });
 }
 
 describe('POST /internal/scheduler/audit-retention', () => {
   it('deletes audit entries (zset member + detail hash) older than 30 days, keeping recent ones', async () => {
-    const old = 'a_old', fresh = 'a_fresh';
-    await fakeRedis.zAdd('testsub:audit', { member: old, score: 1_000 });            // ancient
+    const old = 'a_old',
+      fresh = 'a_fresh';
+    await fakeRedis.zAdd('testsub:audit', { member: old, score: 1_000 }); // ancient
     await fakeRedis.zAdd('testsub:audit', { member: fresh, score: Date.now() });
     await fakeRedis.hSet(`testsub:audit:${old}`, { action: 'remove' });
     await fakeRedis.hSet(`testsub:audit:${fresh}`, { action: 'lock' });
@@ -42,7 +61,11 @@ describe('POST /internal/scheduler/audit-retention', () => {
 
 describe('POST /internal/scheduler/dry-run-replay', () => {
   it('acknowledges (v0.1 stub)', async () => {
-    expect(await (await call('/internal/scheduler/dry-run-replay', { data: { ruleId: 'r_x', subredditName: 'testsub' } })).json()).toEqual({ status: 'ok' });
+    expect(
+      await (
+        await call('/internal/scheduler/dry-run-replay', { data: { ruleId: 'r_x', subredditName: 'testsub' } })
+      ).json(),
+    ).toEqual({ status: 'ok' });
   });
 });
 
@@ -88,7 +111,9 @@ describe('POST /internal/scheduler/rate-limit-circuit-breaker', () => {
 
     await call('/internal/scheduler/rate-limit-circuit-breaker');
     expect(await fakeRedis.get('testsub:circuit:open')).toBe('1');
-    expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledWith(expect.objectContaining({ subredditId: 't5_testsub', subject: expect.stringContaining('vibe-mod') }));
+    expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ subredditId: 't5_testsub', subject: expect.stringContaining('vibe-mod') }),
+    );
   });
 
   it('ignores audit entries older than an hour when counting', async () => {

@@ -1,0 +1,51 @@
+// eslint.config.js — flat config (ESLint 9). See https://eslint.org/docs/latest/use/configure/configuration-files
+// Pairs with Prettier: this file owns *correctness* rules; Prettier owns formatting
+// (eslint-config-prettier, applied last, disables any formatting rules that would conflict).
+
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import vitest from '@vitest/eslint-plugin';
+import prettier from 'eslint-config-prettier';
+
+export default tseslint.config(
+  {
+    ignores: ['node_modules', 'dist', 'build', '.devvit', 'coverage', '**/*.d.ts'],
+  },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
+    rules: {
+      // `_`-prefixed args/vars are intentionally unused (Devvit handler signatures, etc.)
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+      // We deliberately use `as unknown` / loose casts at the Devvit/OpenAI SDK boundary.
+      '@typescript-eslint/no-explicit-any': 'off',
+      // Devvit serverless logs to console on purpose.
+      'no-console': 'off',
+      eqeqeq: ['error', 'smart'],
+      'no-var': 'error',
+      'prefer-const': 'error',
+    },
+  },
+  {
+    // Test files: enable vitest lint rules; the important one is no-focused-tests
+    // (a stray `.only` would silently shrink CI coverage).
+    files: ['**/*.test.ts', 'test/**/*.ts'],
+    plugins: { vitest },
+    rules: {
+      ...vitest.configs.recommended.rules,
+      'vitest/no-focused-tests': 'error',
+      'vitest/no-disabled-tests': 'warn',
+      'vitest/expect-expect': 'off',
+    },
+  },
+  {
+    // Dev scripts run under tsx; allow process/console freely.
+    files: ['scripts/**/*.ts'],
+    rules: {},
+  },
+  // MUST be last: turn off rules that would conflict with Prettier.
+  prettier,
+);

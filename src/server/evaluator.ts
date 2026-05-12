@@ -16,11 +16,11 @@ export function evaluatePredicate(tree: PredicateTree, facts: FactBag): boolean 
   // min(1) at compile time; this is belt-and-suspenders at runtime.
   if ('all' in tree) {
     if (tree.all.length === 0) return false;
-    return tree.all.every(t => evaluatePredicate(t, facts));
+    return tree.all.every((t) => evaluatePredicate(t, facts));
   }
   if ('any' in tree) {
     if (tree.any.length === 0) return false;
-    return tree.any.some(t => evaluatePredicate(t, facts));
+    return tree.any.some((t) => evaluatePredicate(t, facts));
   }
   if ('not' in tree) return !evaluatePredicate(tree.not, facts);
 
@@ -29,17 +29,24 @@ export function evaluatePredicate(tree: PredicateTree, facts: FactBag): boolean 
   const v = tree.value;
 
   switch (tree.op) {
-    case 'eq':   return factValue === v;
-    case 'neq':  return factValue !== v;
-    case 'lt':   return typeof factValue === 'number' && typeof v === 'number' && factValue < v;
-    case 'lte':  return typeof factValue === 'number' && typeof v === 'number' && factValue <= v;
-    case 'gt':   return typeof factValue === 'number' && typeof v === 'number' && factValue > v;
-    case 'gte':  return typeof factValue === 'number' && typeof v === 'number' && factValue >= v;
+    case 'eq':
+      return factValue === v;
+    case 'neq':
+      return factValue !== v;
+    case 'lt':
+      return typeof factValue === 'number' && typeof v === 'number' && factValue < v;
+    case 'lte':
+      return typeof factValue === 'number' && typeof v === 'number' && factValue <= v;
+    case 'gt':
+      return typeof factValue === 'number' && typeof v === 'number' && factValue > v;
+    case 'gte':
+      return typeof factValue === 'number' && typeof v === 'number' && factValue >= v;
     case 'in':
       return Array.isArray(v) && (v as unknown[]).includes(factValue);
     case 'contains':
-      return typeof factValue === 'string' && typeof v === 'string' &&
-             factValue.toLowerCase().includes(v.toLowerCase());
+      return (
+        typeof factValue === 'string' && typeof v === 'string' && factValue.toLowerCase().includes(v.toLowerCase())
+      );
     case 'matches':
       if (typeof factValue !== 'string' || typeof v !== 'string') return false;
       // Catastrophic-backtracking safety is enforced at COMPILE TIME (see
@@ -50,8 +57,8 @@ export function evaluatePredicate(tree: PredicateTree, facts: FactBag): boolean 
       //   - Reject patterns with backreferences
       //   - Bound input to 4096 chars (truncates oversized post bodies)
       if (v.length > 100) return false;
-      if (/[)\]]\s*[+*]/.test(v)) return false;     // nested quantifier shape
-      if (/\\[1-9]/.test(v)) return false;            // backreference
+      if (/[)\]]\s*[+*]/.test(v)) return false; // nested quantifier shape
+      if (/\\[1-9]/.test(v)) return false; // backreference
       try {
         const re = new RegExp(v, 'iu');
         const sample = factValue.length > 4096 ? factValue.slice(0, 4096) : factValue;
@@ -72,9 +79,9 @@ export function evaluatePredicate(tree: PredicateTree, facts: FactBag): boolean 
 export function selectMatchingRules(
   rules: RuleType[],
   trigger: 'onPostSubmit' | 'onCommentSubmit' | 'onPostReport' | 'onCommentReport',
-  facts: FactBag
+  facts: FactBag,
 ): RuleType[] {
-  return rules.filter(r => {
+  return rules.filter((r) => {
     if (!r.enabled) return false;
     if (!r.on.includes(trigger)) return false;
     return evaluatePredicate(r.when as PredicateTree, facts);
