@@ -71,6 +71,7 @@ describe('starter rules behave as intended against representative fact bags', ()
     'content.containsRegex': 'a normal post',
     'content.title.length': 20,
     'content.title.contains': 'A Normal Title',
+    'content.title.upperCaseRatio': 0.05,
     'content.url': '',
     'content.urlDomain': '',
     'sub.weeklyActiveUsers': 500,
@@ -98,13 +99,23 @@ describe('starter rules behave as intended against representative fact bags', ()
     expect(out.map((r) => r.id)).toContain('r_low_karma_link_drop');
   });
 
-  it('an ALL-CAPS title matches the shouting-title rule', () => {
+  it('an ALL-CAPS title matches the shouting-title rule (title ratio, not body ratio)', () => {
     const out = selectMatchingRules(rules, 'onPostSubmit', {
       ...base,
-      'content.upperCaseRatio': 0.95,
+      'content.title.upperCaseRatio': 0.95,
       'content.title.length': 30,
     });
     expect(out.map((r) => r.id)).toContain('r_shouting_title');
+  });
+
+  it('a normal-cased title with an ALL-CAPS body does NOT trigger the shouting-title rule', () => {
+    const out = selectMatchingRules(rules, 'onPostSubmit', {
+      ...base,
+      'content.upperCaseRatio': 0.95, // body is shouty, title is not
+      'content.title.upperCaseRatio': 0.05,
+      'content.title.length': 30,
+    });
+    expect(out.map((r) => r.id)).not.toContain('r_shouting_title');
   });
 
   it('a long all-caps comment matches the wall-of-caps rule', () => {

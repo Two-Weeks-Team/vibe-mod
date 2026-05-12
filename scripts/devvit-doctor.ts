@@ -118,13 +118,18 @@ try {
   const have = process.versions.node;
   if (!want) warn('package.json has no engines.node');
   else {
-    const min = want
-      .replace(/[^\d.]/g, '')
-      .split('.')
-      .map(Number);
-    const cur = have.split('.').map(Number);
-    const geq = cur[0] > min[0] || (cur[0] === min[0] && (cur[1] ?? 0) >= (min[1] ?? 0));
-    if (geq) ok(`node ${have} satisfies engines.node "${want}"`);
+    // Compare major.minor.patch. Only handles a single ">=x.y.z" floor — fine
+    // for the engines fields we write; not a full semver-range parser.
+    const parts = (v: string) =>
+      v
+        .replace(/[^\d.]/g, '')
+        .split('.')
+        .map((n) => Number(n) || 0);
+    const min = parts(want);
+    const cur = parts(have);
+    let cmp = 0;
+    for (let i = 0; i < 3 && cmp === 0; i++) cmp = (cur[i] ?? 0) - (min[i] ?? 0);
+    if (cmp >= 0) ok(`node ${have} satisfies engines.node "${want}"`);
     else fail(`node ${have} does NOT satisfy engines.node "${want}"`);
   }
 } catch {

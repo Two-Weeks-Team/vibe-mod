@@ -21,6 +21,7 @@ function facts(overrides: Partial<Record<string, string | number | boolean>> = {
     'content.containsRegex': 'hello world join my discord.gg/abc',
     'content.title.length': 12,
     'content.title.contains': 'My Cool Title',
+    'content.title.upperCaseRatio': 0.25,
     'content.url': 'https://discord.gg/abc',
     'content.urlDomain': 'discord.gg',
     'sub.weeklyActiveUsers': 1000,

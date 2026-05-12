@@ -27,7 +27,9 @@ type Fixture = {
   mod?: boolean;
   settings?: Record<string, unknown>;
   openai?: unknown;
-  redis?: Record<string, string>;
+  redis?: Record<string, string>; // string keys, e.g. `${sub}:rules:active`
+  redisHashes?: Record<string, Record<string, string>>; // hash keys, e.g. `${sub}:audit:<id>`
+  redisZsets?: Record<string, Array<{ member: string; score: number }>>; // zset keys, e.g. `${sub}:audit`
 };
 
 function snapshotRedisKeys() {
@@ -48,11 +50,27 @@ describe.skipIf(!FIXTURE)('replay', () => {
       );
     const body = 'body' in fx && fx.body !== undefined ? fx.body : fx;
 
+    // Generic Reddit "thing" stub so action/rollback flows complete in a replay
+    // (tests use precise mocks; here we just want to observe the control flow).
+    const stubThing = {
+      approve: async () => {},
+      unlock: async () => {},
+      lock: async () => {},
+      remove: async () => {},
+      removed: false,
+      flair: null as { text: string } | null,
+    };
+    fakeReddit.getPostById.mockResolvedValue(stubThing);
+    fakeReddit.getCommentById.mockResolvedValue(stubThing);
+
     // Apply fixture-driven mock state.
     if (fx.mod ?? true) fakeReddit.getModerators.mockResolvedValue(fakeListing([{ username: 'caller' }]));
     if (fx.settings) fakeSettings.get.mockImplementation(async (k: string) => fx.settings![k]);
     if (fx.openai !== undefined) fakeFetch.mockResolvedValue(openaiResponse(fx.openai));
     if (fx.redis) for (const [k, v] of Object.entries(fx.redis)) await fakeRedis.set(k, v);
+    if (fx.redisHashes) for (const [k, h] of Object.entries(fx.redisHashes)) await fakeRedis.hSet(k, h);
+    if (fx.redisZsets)
+      for (const [k, members] of Object.entries(fx.redisZsets)) for (const m of members) await fakeRedis.zAdd(k, m);
 
     const before = snapshotRedisKeys();
     const res = await app.fetch(
