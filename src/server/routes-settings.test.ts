@@ -6,11 +6,13 @@ import { describe, it, expect } from 'vitest';
 import app from './index';
 
 async function validate(path: string, value: unknown): Promise<{ success: boolean; error?: string }> {
-  const res = await app.fetch(new Request(`http://localhost${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ value, isEditing: false }),
-  }));
+  const res = await app.fetch(
+    new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ value, isEditing: false }),
+    }),
+  );
   return res.json();
 }
 

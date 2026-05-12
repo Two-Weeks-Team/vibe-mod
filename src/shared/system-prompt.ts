@@ -7,7 +7,7 @@ import { FactPaths, SAFE_ACTIONS, GUARDED_ACTIONS } from './rule-schema';
 
 const SAFE = SAFE_ACTIONS.join(' | ');
 const GUARDED = GUARDED_ACTIONS.join(' | ');
-const FACTS = FactPaths.map(f => `  - ${f}`).join('\n');
+const FACTS = FactPaths.map((f) => `  - ${f}`).join('\n');
 
 export const VIBE_MOD_SYSTEM_PROMPT = `You are vibe-mod's rule compiler. The user is a moderator on Reddit who has typed
 a moderation rule in plain English. Your job is to translate it into a strict JSON
@@ -87,11 +87,11 @@ export const FEW_SHOT_EXAMPLES = [
       when: {
         all: [
           { fact: 'author.accountAgeHours', op: 'lt', value: 24 },
-          { fact: 'author.subJoinAgeHours', op: 'lt', value: 3 }
-        ]
+          { fact: 'author.subJoinAgeHours', op: 'lt', value: 3 },
+        ],
       },
-      then: [{ action: 'modqueue', params: { note: 'new-account-fast-post' } }]
-    }
+      then: [{ action: 'modqueue', params: { note: 'new-account-fast-post' } }],
+    },
   },
   {
     user: 'Remove posts containing discord.gg links from accounts with less than 50 karma',
@@ -103,11 +103,11 @@ export const FEW_SHOT_EXAMPLES = [
       when: {
         all: [
           { fact: 'content.url', op: 'contains', value: 'discord.gg' },
-          { fact: 'author.totalKarma', op: 'lt', value: 50 }
-        ]
+          { fact: 'author.totalKarma', op: 'lt', value: 50 },
+        ],
       },
-      then: [{ action: 'remove', params: { spam: true } }]
-    }
+      then: [{ action: 'remove', params: { spam: true } }],
+    },
   },
   {
     user: 'Auto-approve any post from a user who has more than a year of karma here',
@@ -115,11 +115,7 @@ export const FEW_SHOT_EXAMPLES = [
     assistant: {
       needsClarification: true,
       question: 'Did you mean: account age > 1 year (anywhere on Reddit), or active in THIS sub > 1 year?',
-      suggestedAnswers: [
-        'Reddit account older than 365 days',
-        'First post in this sub > 365 days ago',
-        'Both'
-      ]
-    }
-  }
+      suggestedAnswers: ['Reddit account older than 365 days', 'First post in this sub > 365 days ago', 'Both'],
+    },
+  },
 ];

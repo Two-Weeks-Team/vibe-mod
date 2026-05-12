@@ -17,28 +17,59 @@
     "test:coverage": "vitest run --coverage",
     "acceptance": "tsx scripts/acceptance.ts",
     "typecheck": "tsc --noEmit",
-    "settings:set:openai": "devvit settings set openaiApiKey"
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run acceptance",
+    "replay": "tsx scripts/replay.ts",
+    "doctor": "tsx scripts/devvit-doctor.ts",
+    "settings:set:openai": "devvit settings set openaiApiKey",
+    "prepare": "simple-git-hooks"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged",
+    "pre-push": "npm run typecheck && npm test"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix --max-warnings 0",
+      "prettier --write"
+    ],
+    "*.{js,json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   },
   "dependencies": {
-    "@devvit/redis": "^0.12.22",
     "@devvit/reddit": "^0.12.22",
+    "@devvit/redis": "^0.12.22",
     "@devvit/web": "^0.12.22",
     "hono": "^4.12.18",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@devvit/cli": "^0.12.22",
+    "@eslint/js": "^9.39.4",
     "@types/node": "^25.6.2",
+    "@vitest/coverage-v8": "^4.1.5",
+    "@vitest/eslint-plugin": "^1.6.17",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "lint-staged": "^17.0.4",
+    "prettier": "^3.8.3",
+    "simple-git-hooks": "^2.13.1",
     "tsx": "^4.20.7",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.5",
-    "@vitest/coverage-v8": "^4.1.5"
+    "typescript-eslint": "^8.59.3",
+    "vitest": "^4.1.5"
   },
   "engines": {
     "node": ">=22.2.0"
   },
   "vibe-mod": {
-    "fetch-domains": ["api.openai.com"],
+    "fetch-domains": [
+      "api.openai.com"
+    ],
     "tos-url": "https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod/tos.html",
     "privacy-url": "https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod/privacy.html"
   }

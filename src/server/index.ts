@@ -12,12 +12,17 @@
 
 import { Hono } from 'hono';
 import type {
-  MenuItemRequest, UiResponse,
-  OnPostSubmitRequest, OnCommentSubmitRequest,
-  OnPostReportRequest, OnCommentReportRequest,
-  OnAppInstallRequest, OnAppUpgradeRequest,
+  MenuItemRequest,
+  UiResponse,
+  OnPostSubmitRequest,
+  OnCommentSubmitRequest,
+  OnPostReportRequest,
+  OnCommentReportRequest,
+  OnAppInstallRequest,
+  OnAppUpgradeRequest,
   TriggerResponse,
-  SettingsValidationRequest, SettingsValidationResponse,
+  SettingsValidationRequest,
+  SettingsValidationResponse,
 } from '@devvit/web/shared';
 import { reddit, settings, scheduler } from '@devvit/web/server';
 import { redis } from '@devvit/redis';
@@ -59,7 +64,7 @@ async function isCallerModerator(): Promise<boolean> {
       mods = JSON.parse(cached);
     } else {
       const list = await reddit.getModerators({ subredditName });
-      mods = (await list.all()).map(m => m.username);
+      mods = (await list.all()).map((m) => m.username);
       await redis.set(cacheKey, JSON.stringify(mods));
       await redis.expire(cacheKey, MOD_LIST_CACHE_SECONDS);
     }
@@ -76,7 +81,7 @@ function summarizeValidationError(err: unknown): string {
   const raw = String(err);
   if (raw.includes('action')) return 'The compiled rule contained an action this app does not support.';
   if (raw.includes('fact')) return 'The compiled rule referenced an unknown fact.';
-  if (raw.includes('predicate')) return 'The compiled rule\'s condition tree was too complex.';
+  if (raw.includes('predicate')) return "The compiled rule's condition tree was too complex.";
   return 'Compiled rule failed validation. Try rephrasing more simply.';
 }
 
@@ -95,8 +100,12 @@ function isSafeRegex(pattern: string): boolean {
 }
 
 interface PredicateTreeShape {
-  fact?: string; op?: string; value?: unknown;
-  all?: PredicateTreeShape[]; any?: PredicateTreeShape[]; not?: PredicateTreeShape;
+  fact?: string;
+  op?: string;
+  value?: unknown;
+  all?: PredicateTreeShape[];
+  any?: PredicateTreeShape[];
+  not?: PredicateTreeShape;
 }
 function validatePredicateRegexes(tree: PredicateTreeShape): void {
   if ('all' in tree && tree.all) tree.all.forEach(validatePredicateRegexes);
@@ -195,8 +204,8 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     compiled = result.json;
     tokensIn = result.tokensIn;
     tokensOut = result.tokensOut;
-  } catch (err) {
-    // Don't leak err.message — could echo back error context.
+  } catch {
+    // Don't leak the error message — it could echo back compile context to the user.
     return c.json<UiResponse>({
       showToast: {
         text: 'Compiler offline. Your draft is saved. Try again in a minute.',
@@ -257,7 +266,7 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     validatePredicateRegexes(validated.when as PredicateTreeShape);
 
     if (!allowGuarded) {
-      const hasGuarded = validated.then.some(a => ['ban', 'mute', 'permaban'].includes(a.action));
+      const hasGuarded = validated.then.some((a) => ['ban', 'mute', 'permaban'].includes(a.action));
       if (hasGuarded) {
         return c.json<UiResponse>({
           showToast: {
@@ -291,7 +300,7 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
         rules: [],
       };
 
-  const existingIdx = draft.rules.findIndex(r => r.id === validated.id);
+  const existingIdx = draft.rules.findIndex((r) => r.id === validated.id);
   if (existingIdx >= 0) draft.rules[existingIdx] = validated;
   else draft.rules.push(validated);
 
@@ -358,7 +367,7 @@ app.post('/internal/menu/dashboard', async (c) => {
     `Recent actions: ${recent.length}`,
     '',
     'Recent actions:',
-    ...recent.slice(0, 10).map(r => `  ${r.action} (${r.outcome}) — ${(r.ruleSourceNL ?? '').slice(0, 60)}…`),
+    ...recent.slice(0, 10).map((r) => `  ${r.action} (${r.outcome}) — ${(r.ruleSourceNL ?? '').slice(0, 60)}…`),
   ].join('\n');
 
   return c.json<UiResponse>({
@@ -369,9 +378,7 @@ app.post('/internal/menu/dashboard', async (c) => {
         description: summary,
         acceptLabel: draft ? `Activate ${draft.rules.length} draft rule(s)` : 'Close',
         cancelLabel: 'Cancel',
-        fields: [
-          { name: 'activate', label: 'Promote draft → active', type: 'boolean', defaultValue: false },
-        ],
+        fields: [{ name: 'activate', label: 'Promote draft → active', type: 'boolean', defaultValue: false }],
       },
     },
   });
@@ -392,7 +399,10 @@ app.post('/internal/form/dashboard-action', async (c) => {
 
   await redis.set(`${subredditName}:rules:active`, draftJson);
   return c.json<UiResponse>({
-    showToast: { text: 'Draft activated. Shadow mode is ON by default — promote per rule in next 24h.', appearance: 'success' },
+    showToast: {
+      text: 'Draft activated. Shadow mode is ON by default — promote per rule in next 24h.',
+      appearance: 'success',
+    },
   });
 });
 
@@ -417,7 +427,10 @@ app.post('/internal/menu/undo-action', async (c) => {
       break;
     }
   }
-  if (!found) return c.json<UiResponse>({ showToast: 'No vibe-mod action found for this item (or already rolled back, or window expired).' });
+  if (!found)
+    return c.json<UiResponse>({
+      showToast: 'No vibe-mod action found for this item (or already rolled back, or window expired).',
+    });
 
   const result = await rollbackAction(subredditName, found);
   return c.json<UiResponse>({
@@ -463,7 +476,9 @@ app.post('/internal/trigger/on-post-submit', async (c) => {
     url: post.url,
     authorId: author.id,
     authorName: author.name,
-    sub: subreddit ? { weeklyActiveUsers: subreddit.subscribersCount ?? 0, over18: subreddit.nsfw ?? false } : undefined,
+    sub: subreddit
+      ? { weeklyActiveUsers: subreddit.subscribersCount ?? 0, over18: subreddit.nsfw ?? false }
+      : undefined,
   });
 
   const subredditName = await getCurrentSubredditName();
@@ -502,7 +517,9 @@ app.post('/internal/trigger/on-comment-submit', async (c) => {
     parentId: comment.parentId,
     authorId: author.id,
     authorName: author.name,
-    sub: subreddit ? { weeklyActiveUsers: subreddit.subscribersCount ?? 0, over18: subreddit.nsfw ?? false } : undefined,
+    sub: subreddit
+      ? { weeklyActiveUsers: subreddit.subscribersCount ?? 0, over18: subreddit.nsfw ?? false }
+      : undefined,
   });
 
   const subredditName = await getCurrentSubredditName();
@@ -610,7 +627,7 @@ app.post('/internal/scheduler/shadow-promote-check', async (c) => {
 
   let changed = false;
   for (const r of bundle.rules) {
-    if (r.shadow && (now - r.createdAt) >= cutoff) {
+    if (r.shadow && now - r.createdAt >= cutoff) {
       r.shadow = false;
       changed = true;
     }
@@ -675,7 +692,7 @@ function todayKey(): string {
 
 async function callOpenAI(
   userRule: string,
-  clarificationAnswer?: string
+  clarificationAnswer?: string,
 ): Promise<{ json: unknown; tokensIn: number; tokensOut: number }> {
   // BYOK preference: sub-scope override key beats developer global key.
   const subKey = (await settings.get('subredditOpenaiApiKey')) as string;
@@ -726,7 +743,9 @@ async function callOpenAI(
 }
 
 function isClarification(obj: unknown): obj is { needsClarification: true; question: string } {
-  return typeof obj === 'object' && obj !== null && (obj as { needsClarification?: boolean }).needsClarification === true;
+  return (
+    typeof obj === 'object' && obj !== null && (obj as { needsClarification?: boolean }).needsClarification === true
+  );
 }
 
 export default app;

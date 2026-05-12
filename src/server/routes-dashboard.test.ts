@@ -9,11 +9,13 @@ import { fakeRedis, fakeReddit, fakeListing } from '../../test/setup';
 import { seedStarterRules } from '../shared/starter-rules';
 
 const call = (path: string, body: unknown = {}) =>
-  app.fetch(new Request(`http://localhost${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  }));
+  app.fetch(
+    new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
 
 function asMod() {
   fakeReddit.getModerators.mockResolvedValue(fakeListing([{ username: 'caller' }]));
@@ -26,13 +28,17 @@ async function seedAudit(actionId: string, fields: Record<string, string>, score
 
 describe('POST /internal/menu/dashboard', () => {
   it('rejects a non-moderator', async () => {
-    const body = await (await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })).json();
+    const body = await (
+      await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
+    ).json();
     expect(body.showToast).toEqual({ text: 'Only moderators can use this.', appearance: 'neutral' });
   });
 
   it('renders an empty dashboard for a fresh install', async () => {
     asMod();
-    const body = await (await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })).json();
+    const body = await (
+      await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
+    ).json();
     expect(body.showForm.name).toBe('dashboardForm');
     expect(body.showForm.form.description).toContain('Active rules: 0');
     expect(body.showForm.form.description).toContain('Draft rules: 0');
@@ -41,12 +47,25 @@ describe('POST /internal/menu/dashboard', () => {
 
   it('summarises active + draft counts and recent actions, with an Activate label when a draft exists', async () => {
     asMod();
-    await fakeRedis.set('testsub:rules:active', JSON.stringify({ ...seedStarterRules(1), rules: seedStarterRules(1).rules.slice(0, 2) }));
+    await fakeRedis.set(
+      'testsub:rules:active',
+      JSON.stringify({ ...seedStarterRules(1), rules: seedStarterRules(1).rules.slice(0, 2) }),
+    );
     await fakeRedis.set('testsub:rules:draft', JSON.stringify(seedStarterRules(2)));
-    await seedAudit('a_1', { action: 'modqueue', outcome: 'applied', ruleSourceNL: 'flag low karma posts', thingId: 't3_x' }, 1000);
-    await seedAudit('a_2', { action: 'remove', outcome: 'shadow', ruleSourceNL: 'remove discord links', thingId: 't3_y' }, 2000);
+    await seedAudit(
+      'a_1',
+      { action: 'modqueue', outcome: 'applied', ruleSourceNL: 'flag low karma posts', thingId: 't3_x' },
+      1000,
+    );
+    await seedAudit(
+      'a_2',
+      { action: 'remove', outcome: 'shadow', ruleSourceNL: 'remove discord links', thingId: 't3_y' },
+      2000,
+    );
 
-    const body = await (await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })).json();
+    const body = await (
+      await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
+    ).json();
     expect(body.showForm.form.description).toContain('Active rules: 2');
     expect(body.showForm.form.description).toContain('Draft rules: 5');
     expect(body.showForm.form.description).toContain('Recent actions: 2');

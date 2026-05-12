@@ -10,11 +10,13 @@ import { Rule, RuleBundle, type RuleType } from '../shared/rule-schema';
 import { seedStarterRules } from '../shared/starter-rules';
 
 const call = (path: string, body: unknown) =>
-  app.fetch(new Request(`http://localhost${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  }));
+  app.fetch(
+    new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
 
 /** A live (shadow:false) active bundle with one rule matching low-karma authors → modqueue. */
 function activeLowKarmaModqueueBundle() {
@@ -25,9 +27,20 @@ function activeLowKarmaModqueueBundle() {
     on: ['onPostSubmit', 'onCommentSubmit'],
     when: { fact: 'author.totalKarma', op: 'lt', value: 50 },
     then: [{ action: 'modqueue', params: { note: 'low-karma' } }],
-    createdAt: 0, createdBy: 't2_seed', enabled: true, shadow: false,
+    createdAt: 0,
+    createdBy: 't2_seed',
+    enabled: true,
+    shadow: false,
   });
-  return RuleBundle.parse({ schemaVersion: '1.0.0', bundleVersion: 1, compiledAt: 0, llmModel: 'seed', llmTokensIn: 0, llmTokensOut: 0, rules: [r] });
+  return RuleBundle.parse({
+    schemaVersion: '1.0.0',
+    bundleVersion: 1,
+    compiledAt: 0,
+    llmModel: 'seed',
+    llmTokensIn: 0,
+    llmTokensOut: 0,
+    rules: [r],
+  });
 }
 
 const POST_EVENT = {
@@ -93,7 +106,9 @@ describe('POST /internal/trigger/on-post-submit', () => {
 
 describe('POST /internal/trigger/on-comment-submit', () => {
   it('is a no-op without a comment/author', async () => {
-    expect(await (await call('/internal/trigger/on-comment-submit', { type: 'CommentSubmit' })).json()).toEqual({ status: 'ok' });
+    expect(await (await call('/internal/trigger/on-comment-submit', { type: 'CommentSubmit' })).json()).toEqual({
+      status: 'ok',
+    });
   });
 
   it('acts on a matching comment', async () => {
@@ -124,12 +139,18 @@ describe('POST /internal/trigger/on-app-install', () => {
 
 describe('trigger stubs', () => {
   it('on-app-upgrade returns ok', async () => {
-    expect(await (await call('/internal/trigger/on-app-upgrade', { type: 'AppUpgrade' })).json()).toEqual({ status: 'ok' });
+    expect(await (await call('/internal/trigger/on-app-upgrade', { type: 'AppUpgrade' })).json()).toEqual({
+      status: 'ok',
+    });
   });
   it('on-post-report returns ok (v0.1 stub)', async () => {
-    expect(await (await call('/internal/trigger/on-post-report', { type: 'PostReport' })).json()).toEqual({ status: 'ok' });
+    expect(await (await call('/internal/trigger/on-post-report', { type: 'PostReport' })).json()).toEqual({
+      status: 'ok',
+    });
   });
   it('on-comment-report returns ok (v0.1 stub)', async () => {
-    expect(await (await call('/internal/trigger/on-comment-report', { type: 'CommentReport' })).json()).toEqual({ status: 'ok' });
+    expect(await (await call('/internal/trigger/on-comment-report', { type: 'CommentReport' })).json()).toEqual({
+      status: 'ok',
+    });
   });
 });

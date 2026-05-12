@@ -27,6 +27,7 @@ By installing vibe-mod on a subreddit you moderate, you agree:
 ## 4. What vibe-mod does, and what it does not do
 
 vibe-mod **does**:
+
 - Read your English description of a rule when you submit one.
 - Send your English description (and only your English description) to OpenAI for translation into structured JSON.
 - Store the resulting JSON rule in Reddit's Devvit Redis, scoped to your subreddit.
@@ -35,6 +36,7 @@ vibe-mod **does**:
 - Log every action with the rule that fired, the post/comment, and the time. The log is visible to your mod team and retained for 30 days.
 
 vibe-mod **does not**:
+
 - Read or send Reddit user content (post bodies, comment bodies, usernames, voting history, browsing history, DMs, etc.) to OpenAI or any third party. The LLM only ever sees the **moderator's own typed rule sentence**. Rule evaluation is deterministic and runs entirely inside Devvit.
 - Take actions outside your subreddit.
 - Take ban / mute / permaban actions automatically. Those actions are only emitted when the moderator who wrote the rule explicitly enabled the "Allow ban/mute" checkbox.
@@ -59,6 +61,7 @@ vibe-mod uses OpenAI to translate plain-English rule descriptions into JSON. AI 
 - Occasionally fail to compile a rule, in which case vibe-mod shows you the failure and asks you to rephrase.
 
 vibe-mod mitigates these risks with:
+
 - A mandatory **dry-run preview** before any rule can be activated.
 - A **24-hour shadow mode** during which a new rule logs what it would do but takes no action.
 - A **closed action whitelist** (the LLM cannot smuggle in actions vibe-mod does not support).
@@ -75,6 +78,7 @@ If the rate-limit safety brake fires (more than the configured actions/hour), vi
 ## 8. Termination
 
 You may uninstall vibe-mod at any time from your subreddit's Mod Tools → Apps page. Uninstalling vibe-mod:
+
 - Stops all rule evaluation immediately.
 - Removes the app's Redis data scoped to your subreddit (as enforced by Devvit).
 - Does **not** revert past moderation actions. You can manually undo recent actions via Reddit's mod queue, or via vibe-mod's `vibe-mod: Undo this action` menu before uninstalling.

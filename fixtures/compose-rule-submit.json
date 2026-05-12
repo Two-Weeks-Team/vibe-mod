@@ -1,0 +1,22 @@
+{
+  "route": "/internal/form/compose-rule-submit",
+  "mod": true,
+  "settings": { "openaiApiKey": "sk-demo", "openaiModel": "gpt-5.4-nano" },
+  "openai": {
+    "id": "r_demo_link_spam",
+    "name": "Demo: flag link spam from new accounts",
+    "sourceNL": "if a post has 3 or more links from an account under a day old, send it to the mod queue",
+    "on": ["onPostSubmit"],
+    "when": {
+      "all": [
+        { "fact": "content.linkCount", "op": "gte", "value": 3 },
+        { "fact": "author.accountAgeHours", "op": "lt", "value": 24 }
+      ]
+    },
+    "then": [{ "action": "modqueue", "params": { "note": "new-account-link-spam" } }]
+  },
+  "body": {
+    "rule": "if a post has 3 or more links from an account under a day old, send it to the mod queue",
+    "allowGuarded": false
+  }
+}

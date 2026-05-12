@@ -90,17 +90,29 @@ describe('starter rules behave as intended against representative fact bags', ()
   });
 
   it('a low-karma multi-link post matches the link-drop rule', () => {
-    const out = selectMatchingRules(rules, 'onPostSubmit', { ...base, 'content.linkCount': 4, 'author.totalKarma': 10 });
+    const out = selectMatchingRules(rules, 'onPostSubmit', {
+      ...base,
+      'content.linkCount': 4,
+      'author.totalKarma': 10,
+    });
     expect(out.map((r) => r.id)).toContain('r_low_karma_link_drop');
   });
 
   it('an ALL-CAPS title matches the shouting-title rule', () => {
-    const out = selectMatchingRules(rules, 'onPostSubmit', { ...base, 'content.upperCaseRatio': 0.95, 'content.title.length': 30 });
+    const out = selectMatchingRules(rules, 'onPostSubmit', {
+      ...base,
+      'content.upperCaseRatio': 0.95,
+      'content.title.length': 30,
+    });
     expect(out.map((r) => r.id)).toContain('r_shouting_title');
   });
 
   it('a long all-caps comment matches the wall-of-caps rule', () => {
-    const out = selectMatchingRules(rules, 'onCommentSubmit', { ...base, 'content.upperCaseRatio': 0.9, 'content.length': 120 });
+    const out = selectMatchingRules(rules, 'onCommentSubmit', {
+      ...base,
+      'content.upperCaseRatio': 0.9,
+      'content.length': 120,
+    });
     expect(out.map((r) => r.id)).toContain('r_wall_of_caps_comment');
   });
 

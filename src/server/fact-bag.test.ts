@@ -67,7 +67,13 @@ describe('buildPostFactBag', () => {
 
 describe('buildCommentFactBag', () => {
   it('emits the closed key set with title facts zeroed out', async () => {
-    const bag = await buildCommentFactBag({ id: 't1_c1', body: 'nice POST friend', parentId: 't3_p1', authorId: 't2_a1', authorName: 'alice' });
+    const bag = await buildCommentFactBag({
+      id: 't1_c1',
+      body: 'nice POST friend',
+      parentId: 't3_p1',
+      authorId: 't2_a1',
+      authorName: 'alice',
+    });
     expect(new Set(Object.keys(bag))).toEqual(new Set(FactPaths));
     expect(bag['content.title.length']).toBe(0);
     expect(bag['content.title.contains']).toBe('');

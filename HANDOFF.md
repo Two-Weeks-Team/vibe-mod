@@ -15,11 +15,11 @@
 
 ## Win 확률 (audit 통과 시)
 
-| 상 | 확률 |
-|---|---|
-| Grand $10K (Best New Mod Tool) | **35~55%** |
-| Honorable Mention $1K | 50~65% |
-| Moderator's Choice $10K | 20~30% (사전 5+ 모드 sub install 시) |
+| 상                             | 확률                                 |
+| ------------------------------ | ------------------------------------ |
+| Grand $10K (Best New Mod Tool) | **35~55%**                           |
+| Honorable Mention $1K          | 50~65%                               |
+| Moderator's Choice $10K        | 20~30% (사전 5+ 모드 sub install 시) |
 
 ---
 
@@ -49,6 +49,7 @@ npx tsc --noEmit
 ```
 
 **또는** (대안 — 더 안전):
+
 - 이 디렉토리(`~/Documents/GitHub/vibe-mod/`) 자체를 wizard의 `--directory` 옵션으로 지정해서 wizard가 빈 폴더에서 시작하는 대신 우리 산출물 위에서 working하도록.
 
 ### Step 2. OpenAI 키 발급 + 권한 확인
@@ -73,6 +74,7 @@ npm run dev
 ```
 
 **Gate 통과 시 Day 2 진행. 미통과 시:**
+
 - `devvit logs` 확인
 - 가장 흔한 fail: `permissions.http.domains`에 `api.openai.com` 누락 (devvit.json 확인)
 - 두 번째 fail: Hono/Zod 미설치 (`npm install hono zod`)
@@ -81,20 +83,20 @@ npm run dev
 
 ## 🗓 17일 일정 요약 (D-15 ~ D-day)
 
-| 날짜 | 마일스톤 | EXIT GATE |
-|---|---|---|
-| **05-12 화 (D-15)** | **Day 1: setup + first menu shown** ← 오늘 | Compose 메뉴 표시 |
-| 05-13 수 (D-14) | Day 2: OpenAI compile + first audit entry | shadow audit 작성됨 |
-| 05-14 목 (D-13) | Day 3: rollback + dry-run + log UI | undo round-trip 작동 |
-| 05-15 금 (D-12) | Day 4: hardening + acceptance script + ToS/Privacy 호스팅 | `npm run acceptance` 4/4 pass |
-| 05-16~17 (D-11~10) | Beta outreach 시작 (r/ModSupport + r/redditdev) | 8 mod commitments |
-| 05-18~21 (D-9~6) | Phase A 베타 (본인 test sub, 5 mods 모드 권한) | 10 rules 작성, 일이슈 triage |
-| 05-22~23 (D-5~4) | Phase B 베타 (모드 본인 sub) + `npx devvit publish --public` 신청 | publish review 진행 |
-| 05-24 토 (D-3) | Rehearsal record v0 take | take 1 in the can |
-| 05-25 일 (D-2) | ⚠️ **FEATURE FREEZE** + 3 rehearsal takes | UI 변경 0 |
-| 05-26 월 (D-1) | Final record (3 takes minimum) + captions SRT | 데모 영상 YouTube 업로드 |
-| **05-27 화 (D-day)** | Devpost 제출 (10:00 PT KST 28 02:00 목표, 8h buffer) | 제출 완료 |
-| 05-27 18:00 PT | **🔴 마감** (KST 28 10:00) | — |
+| 날짜                 | 마일스톤                                                          | EXIT GATE                     |
+| -------------------- | ----------------------------------------------------------------- | ----------------------------- |
+| **05-12 화 (D-15)**  | **Day 1: setup + first menu shown** ← 오늘                        | Compose 메뉴 표시             |
+| 05-13 수 (D-14)      | Day 2: OpenAI compile + first audit entry                         | shadow audit 작성됨           |
+| 05-14 목 (D-13)      | Day 3: rollback + dry-run + log UI                                | undo round-trip 작동          |
+| 05-15 금 (D-12)      | Day 4: hardening + acceptance script + ToS/Privacy 호스팅         | `npm run acceptance` 4/4 pass |
+| 05-16~17 (D-11~10)   | Beta outreach 시작 (r/ModSupport + r/redditdev)                   | 8 mod commitments             |
+| 05-18~21 (D-9~6)     | Phase A 베타 (본인 test sub, 5 mods 모드 권한)                    | 10 rules 작성, 일이슈 triage  |
+| 05-22~23 (D-5~4)     | Phase B 베타 (모드 본인 sub) + `npx devvit publish --public` 신청 | publish review 진행           |
+| 05-24 토 (D-3)       | Rehearsal record v0 take                                          | take 1 in the can             |
+| 05-25 일 (D-2)       | ⚠️ **FEATURE FREEZE** + 3 rehearsal takes                         | UI 변경 0                     |
+| 05-26 월 (D-1)       | Final record (3 takes minimum) + captions SRT                     | 데모 영상 YouTube 업로드      |
+| **05-27 화 (D-day)** | Devpost 제출 (10:00 PT KST 28 02:00 목표, 8h buffer)              | 제출 완료                     |
+| 05-27 18:00 PT       | **🔴 마감** (KST 28 10:00)                                        | —                             |
 
 ---
 
@@ -124,22 +126,32 @@ npm run dev
 ├── src/
 │   ├── shared/
 │   │   ├── rule-schema.ts       (160줄, Zod v4 strict)
-│   │   └── system-prompt.ts     (110줄, gpt-5.4-nano용)
-│   ├── shared/starter-rules.ts  (110줄, 5 seed rules — SAFE actions, shadow:true, onAppInstall에서 draft로 seed)
-│   ├── shared/starter-rules.ts  (110줄, 5 seed rules — SAFE actions, shadow:true, onAppInstall에서 draft로 seed)
+│   │   ├── system-prompt.ts     (110줄, gpt-5.4-nano용)
+│   │   └── starter-rules.ts     (110줄, 5 seed rules — SAFE actions, shadow:true, onAppInstall에서 draft로 seed)
 │   └── server/
-│       ├── devvit-helpers.ts     (45줄, @devvit/web SDK 어댑터: getCurrentSubreddit{Name,Ref}, asT1/asT3)
+│       ├── devvit-helpers.ts     (32줄, @devvit/web SDK 어댑터: getCurrentSubreddit{Name,Ref}, asT1/asT3)
 │       ├── evaluator.ts          (75줄, pure deterministic)
 │       ├── fact-bag.ts           (180줄, sub-scoped Redis + safe defaults)
 │       ├── executor.ts           (280줄, action whitelist + sub-scoped audit + rollback)
 │       └── index.ts              (530줄, Hono routes + isCallerModerator guard, onAppInstall이 seedStarterRules() 호출)
 ├── scripts/
-│   └── acceptance.ts            ← `npm run acceptance` — Day1~Day4 exit gate (config↔code · schema · tsc · vitest). 현재 4/4 pass
+│   ├── acceptance.ts            ← `npm run acceptance` — G1~G4 exit gate (config↔code · devvit.json schema/cron · tsc · vitest). 4/4 pass
+│   ├── devvit-doctor.ts         ← `npm run doctor` — 배포 전 프리플라이트 (devvit.json 정합성, fetch host↔permissions, route↔config 와이어링, node engine, login/app-id)
+│   └── replay.ts                ← `npm run replay fixtures/x.json` — 이벤트/폼을 로컬 Hono app에 in-memory 더블로 발사, 응답+redis diff+발생한 Reddit 호출 출력 (playtest 불필요)
+├── fixtures/
+│   ├── post-submit.json         ← replay 예제: 트리거 이벤트
+│   └── compose-rule-submit.json ← replay 예제: 폼 제출 (canned OpenAI 응답 포함)
 ├── test/
-│   └── setup.ts                 ← vitest global setup: in-memory Redis + Devvit SDK mock + OpenAI fetch mock
-├── .github/workflows/ci.yml     ← CI: npm ci → tsc --noEmit → npm test → npm run acceptance
+│   ├── devvit-testkit.ts        ← 재사용 가능한 Devvit 테스트 더블 (in-memory Redis, Reddit/Listing/settings/scheduler, fetch). 프로젝트 무관 — 다음 모드에 복사/패키지화 대상
+│   ├── setup.ts                 ← vitest setup (얇은 프로젝트 레이어: testkit 인스턴스화 + vi.mock + beforeEach 리셋)
+│   └── replay-runner.test.ts    ← replay.ts의 엔진 (REPLAY_FIXTURE 없으면 skip)
+├── eslint.config.js · .prettierrc.json · .prettierignore · .nvmrc   ← lint/format/node 핀
+├── .github/
+│   ├── workflows/ci.yml         ← CI: install → lint(0 warn) → format:check → tsc → test(coverage) → acceptance
+│   └── dependabot.yml           ← weekly; @devvit/* 그룹 1 PR
 └── docs/
     ├── README-vibe-mod.md       ← 2-door split + Fetch Domains 섹션
+    ├── new-mod-checklist.md     ← 다음 Devvit 모드 시작 시 복사할 인프라 목록 + SDK gotcha 목록
     ├── tos.md                   ← Terms of Service
     └── privacy.md               ← Privacy Policy
 
@@ -147,24 +159,31 @@ src/**/*.test.ts — 148 tests (vitest), 12 files:
   rule-schema · evaluator · executor · fact-bag · system-prompt · starter-rules
   + routes-compose / routes-dashboard / routes-undo / routes-triggers / routes-scheduler / routes-settings
   (routes-* = app.fetch() 호출 테스트 — 모든 Hono 라우트를 Devvit/OpenAI mock으로 실증)
+
+npm scripts:  test · test:watch · test:coverage · typecheck · lint · lint:fix · format · format:check
+              · check (typecheck+lint+format:check+test+acceptance) · acceptance · doctor · replay
+              · dev · build · upload · publish · publish:public · logs
+git hooks (simple-git-hooks): pre-commit → lint-staged ;  pre-push → typecheck + test
 ```
 
-**Day-1 세션(2026-05-12)에서 추가 완료**:
-- ✅ `scripts/acceptance.ts` — G1~G4 gate. `npm run acceptance` → 4/4 pass (이제 `tsc --noEmit`도 G4 체크에 포함).
-  - acceptance가 잡은 버그 1건 수정: `devvit.json`의 orphaned `activateRuleForm`(라우트 없음) 제거 — 활성화는 dashboardForm 경로 사용.
-- ✅ `test/setup.ts` + 12개 test 파일 (148 tests, 모두 pass) — 6 unit + 6 route 호출 테스트(기능별 분리).
-- ✅ `src/shared/starter-rules.ts` — 5 starter rules, `onAppInstall` 트리거가 draft로 seed (mod가 Dashboard에서 Activate).
-- ✅ **Devvit SDK API 정합화** — `npx tsc --noEmit` 이제 clean (이전 ~45 에러).
-  - `getCurrentSubredditName()` → `reddit.getCurrentSubreddit().name` (helper로 추출), `getPostById`/`getCommentById` T3/T1 cast,
-    `target.report()` → `reddit.report(thing, opts)`, `getModerators()`/Listing `.all()`, `getUserKarmaFromCurrentSubreddit(name)` → `{fromComments,fromPosts}`,
-    `modMail.create` → `modMail.createModNotification`, `redis.zCount` 없음 → 점수 윈도우 zRange로 카운트, `@devvit/web/shared`엔 `TaskRequest/Response` 없음 → 로컬 타입.
-  - **버그 수정**: executor가 audit/rollback/breaker 키를 sub-scope 없이 쓰던 것 → `${sub}:audit`, `${sub}:rollback:…`, `${sub}:circuit:open`으로 통일 (Dashboard/Undo/breaker가 읽는 키와 일치). 이전엔 Dashboard·Undo가 실 audit를 못 찾았음.
-- ✅ `.github/workflows/ci.yml` — push/PR마다 tsc + test + acceptance.
+**세션 2 (2026-05-12) — dev 인프라/하네스 추가**:
+
+- ✅ **재사용 하네스 추출** — `test/devvit-testkit.ts` (in-memory Redis + Devvit SDK 더블, 프로젝트 무관). `test/setup.ts`는 이제 얇은 레이어. 다음 모드에 그대로 복사 (또는 `@<org>/devvit-testkit`로 패키지화).
+- ✅ **로컬 replay 하네스** — `npm run replay fixtures/x.json`: `devvit playtest`(실제 sub) 없이 트리거/폼 로직을 1초 내 반복 검증. `fixtures/`에 예제 2개.
+- ✅ **`npm run doctor`** — 배포 전 프리플라이트 (hard: devvit.json 정합성·fetch host↔permissions·route↔config·node engine / soft: devvit login·`.devvit-app-id`).
+- ✅ **lint/format** — ESLint 9 flat config (`@typescript-eslint` + `@vitest/eslint-plugin`, `vitest/no-focused-tests` 등) + Prettier. `npm run lint`은 0-warning strict. 전체 코드베이스 prettier 정규화 적용.
+- ✅ **CI 확장** — install → **lint** → **format:check** → typecheck → **test:coverage** → acceptance. (`npm ci`는 esbuild per-platform optional deps EBADPLATFORM 때문에 `npm install` 사용.) `node-version-file: .nvmrc`.
+- ✅ **Dependabot** — weekly, `@devvit/*` 한 PR로 그룹 (SDK drift 가시화), dev-deps 그룹, github-actions.
+- ✅ **git hooks** — `simple-git-hooks` + `lint-staged`: pre-commit(lint-staged) / pre-push(typecheck+test). `npm install`이 `prepare`로 설치.
+- ✅ acceptance G1에 devvit.json `$schema` + cron 5-field 체크 추가. `docs/new-mod-checklist.md` 신규.
+- ✅ **버그 수정**: 미사용 변수 2건(`SAFE_ACTIONS` import, `catch (err)`) — ESLint가 잡음.
 
 **아직 남음 (= 사용자 Devvit wizard 단계 + 이후)**:
-- `npm run dev` 실기 playtest로만 검증되는 gate (Compose 메뉴 렌더, OpenAI compile 라운드트립, undo 라운드트립) — acceptance 출력의 MANUAL 섹션 참조
+
+- `npm run dev` 실기 playtest로만 검증되는 gate (Compose 메뉴 렌더, OpenAI compile 라운드트립, undo 라운드트립) — acceptance/doctor 출력의 MANUAL/soft 섹션 참조
 - `.devvit-app-id` (wizard 생성) + `devvit build`로 SDK 정합화 최종 확인 (타입은 통과하나 실제 런타임 동작은 playtest 필요)
 - ToS + Privacy HTML로 export 후 갤러리 repo에 push (Devpost 제출 폼 URL용)
+- (선택) `Two-Weeks-Team/devvit-mod-template` — `docs/new-mod-checklist.md`의 인프라를 `gh repo create --template`용으로 분리. 인프라 파일은 vibe-mod에서 복사 가능하므로 급하진 않음.
 
 ---
 
@@ -172,11 +191,11 @@ src/**/*.test.ts — 148 tests (vitest), 12 files:
 
 상세는 `<gallery>/vibe-mod-final-plan.html` §2. 요약:
 
-| Severity | 개수 | 대표 |
-|---|---|---|
-| CRITICAL | 2 | 회로차단기 zCard→zCount, 서버측 모드 인증 |
-| HIGH | 5 | ReDoS, isModerator 하드코딩, Zod .strict() 누락, 트리거 idempotency, getUserByUsername 예외 |
-| MEDIUM | 11 | TOCTOU, prompt injection, 키 sub-scope, crypto random, audit fidelity, flair API, 등 |
+| Severity | 개수 | 대표                                                                                        |
+| -------- | ---- | ------------------------------------------------------------------------------------------- |
+| CRITICAL | 2    | 회로차단기 zCard→zCount, 서버측 모드 인증                                                   |
+| HIGH     | 5    | ReDoS, isModerator 하드코딩, Zod .strict() 누락, 트리거 idempotency, getUserByUsername 예외 |
+| MEDIUM   | 11   | TOCTOU, prompt injection, 키 sub-scope, crypto random, audit fidelity, flair API, 등        |
 
 각 결함의 verbatim 출처 + 패치 코드는 final-plan §2 매트릭스 참조.
 
@@ -185,18 +204,21 @@ src/**/*.test.ts — 148 tests (vitest), 12 files:
 ## 핵심 외부 자료 (한 번에 다시 잡을 수 있는 링크)
 
 ### 갤러리 repo (모든 보고서·산출물 호스팅)
+
 - 🌐 **메인**: https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/
 - 🏁 **최종 계획 v3**: https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod-final-plan.html
 - 🔬 Feasibility: https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/feasibility-validation.html
 - 📦 GitHub: https://github.com/Two-Weeks-Team/reddit-mod-tools-port-gallery
 
 ### 해커톤 공식
+
 - 🏆 Devpost: https://mod-tools-migration.devpost.com/
 - 📜 Rules: https://mod-tools-migration.devpost.com/rules
 - 💬 Discord: https://discord.com/invite/R7yu2wh9Qz
 - 🦊 r/Devvit: https://www.reddit.com/r/Devvit/
 
 ### Devvit 공식
+
 - 📖 Quickstart (Mod Tool): https://developers.reddit.com/docs/quickstart/quickstart-mod-tool
 - 🌐 HTTP Fetch Policy: https://developers.reddit.com/docs/capabilities/server/http-fetch-policy
 - 🔧 Triggers: https://developers.reddit.com/docs/capabilities/server/triggers
@@ -206,6 +228,7 @@ src/**/*.test.ts — 148 tests (vitest), 12 files:
 - 📡 Reddit API: https://developers.reddit.com/docs/capabilities/server/reddit-api
 
 ### OpenAI
+
 - 📊 Models: https://developers.openai.com/api/docs/models
 - 💰 Pricing: https://developers.openai.com/api/docs/pricing
 - 🎯 Structured Outputs: https://developers.openai.com/api/docs/guides/structured-outputs
@@ -214,12 +237,12 @@ src/**/*.test.ts — 148 tests (vitest), 12 files:
 
 ## 💵 비용 추정 (gpt-5.4-nano)
 
-| 단위 | 비용 |
-|---|---|
-| 1 compile (~800 in + 400 out tokens) | $0.00066 |
-| 1 sub × 50 compiles/day × 30일 | ~$0.99/month |
-| 1,000 subs/month (full quota 사용 가정) | ~$990/month |
-| 1,000 subs/month (실제 평균 5 compiles/sub/day) | ~$99/month |
+| 단위                                            | 비용         |
+| ----------------------------------------------- | ------------ |
+| 1 compile (~800 in + 400 out tokens)            | $0.00066     |
+| 1 sub × 50 compiles/day × 30일                  | ~$0.99/month |
+| 1,000 subs/month (full quota 사용 가정)         | ~$990/month  |
+| 1,000 subs/month (실제 평균 5 compiles/sub/day) | ~$99/month   |
 
 **BYOK 옵션**: `subredditOpenaiApiKey` (subreddit-scope) 설정 시 50/day 쿼터 우회. 모드가 본인 키 부담.
 
