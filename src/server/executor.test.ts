@@ -198,4 +198,24 @@ describe('rollbackAction', () => {
     const res = await rollbackAction('testsub', audits[0].actionId);
     expect(res).toEqual({ ok: false, reason: expect.stringContaining('boom') });
   });
+
+  it('unbans the user when rolling back a ban (token seeded directly — guarded actions are not auto-applied in v0.1)', async () => {
+    const entry = {
+      actionId: 'a_seed_ban',
+      ruleId: 'r_x',
+      ruleSourceNL: 'ban repeat spammers',
+      thingId: 't3_x',
+      thingType: 'post' as const,
+      action: 'ban',
+      params: {},
+      authorName: 'spammer',
+      ts: Date.now(),
+      outcome: 'applied' as const,
+    };
+    await fakeRedis.set('testsub:rollback:a_seed_ban', JSON.stringify({ entry, reverseParams: { action: 'ban' } }));
+    const res = await rollbackAction('testsub', 'a_seed_ban');
+    expect(res.ok).toBe(true);
+    expect(fakeReddit.unbanUser).toHaveBeenCalledWith('spammer', 'testsub');
+    expect(await fakeRedis.get('testsub:rollback:a_seed_ban')).toBeUndefined();
+  });
 });
