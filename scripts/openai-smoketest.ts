@@ -18,7 +18,7 @@
 // fractions of a cent per run and needs a real key.
 //
 // IMPORTANT: keep the request payload below in sync with `callOpenAI` in
-// src/server/index.ts (same model default, response_format, temperature, max_tokens).
+// src/server/index.ts (same model default, response_format, max_completion_tokens).
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -56,7 +56,8 @@ const CASES: Case[] = [
   },
   { rule: 'Remove posts that contain discord.gg links from accounts with under 50 karma', expect: 'rule' },
   {
-    rule: 'If a post title is more than 12 characters and mostly capital letters, add the flair "Edit your title?"',
+    // explicit numeric threshold → should compile against content.title.upperCaseRatio
+    rule: 'If a post title is at least 12 characters and more than 70% capital letters, add the flair "Edit your title?"',
     expect: 'rule',
   },
   { rule: 'Report comments that are over 60 characters and almost entirely uppercase', expect: 'rule' },
@@ -93,8 +94,8 @@ async function compile(userRule: string): Promise<ApiResult> {
       model: MODEL,
       response_format: { type: 'json_object' },
       messages,
-      max_tokens: 700,
-      temperature: 0.1,
+      // Newer OpenAI models (gpt-5.x family) require max_completion_tokens, not max_tokens.
+      max_completion_tokens: 700,
     }),
   });
   if (!resp.ok) {
