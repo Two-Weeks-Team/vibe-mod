@@ -73,7 +73,7 @@ type ApiResult =
   | { kind: 'rule'; rule: RuleType; tokensIn: number; tokensOut: number }
   | { kind: 'clarification'; question: string; tokensIn: number; tokensOut: number }
   | { kind: 'invalid'; raw: unknown; reason: string; tokensIn: number; tokensOut: number }
-  | { kind: 'http_error'; status: number };
+  | { kind: 'http_error'; status: number; code?: string; message?: string };
 
 async function compile(userRule: string): Promise<ApiResult> {
   // Mirrors callOpenAI() in src/server/index.ts.
@@ -97,7 +97,18 @@ async function compile(userRule: string): Promise<ApiResult> {
       temperature: 0.1,
     }),
   });
-  if (!resp.ok) return { kind: 'http_error', status: resp.status };
+  if (!resp.ok) {
+    let code: string | undefined;
+    let message: string | undefined;
+    try {
+      const err = (await resp.json()) as { error?: { code?: string; message?: string; type?: string } };
+      code = err.error?.code ?? err.error?.type;
+      message = err.error?.message;
+    } catch {
+      /* body wasn't JSON */
+    }
+    return { kind: 'http_error', status: resp.status, code, message };
+  }
 
   const data = (await resp.json()) as {
     choices: Array<{ message: { content: string } }>;
@@ -167,10 +178,27 @@ const PRICE_PER_M = { in: 0.05, out: 0.4 }; // USD per 1M tokens
       continue;
     }
     if (r.kind === 'http_error') {
+      const billingCodes = ['insufficient_quota', 'billing_not_active', 'account_deactivated'];
+      const fatal = r.status === 401 || r.code === 'model_not_found' || billingCodes.includes(r.code ?? '');
+      const hint =
+        r.status === 404 || r.code === 'model_not_found'
+          ? `  → model "${MODEL}" not available to this key (try OPENAI_MODEL=gpt-5-mini, or check the exact model name)`
+          : r.status === 401
+            ? '  → invalid API key'
+            : billingCodes.includes(r.code ?? '')
+              ? '  → OpenAI account billing is not active — add a payment method at platform.openai.com/account/billing (the key is fine; the account just is not enabled for API use yet)'
+              : r.status === 429
+                ? '  → rate-limited — wait and re-run, or raise your usage limits'
+                : '';
       console.log(
-        `    ✗ HTTP ${r.status}${r.status === 404 ? `  (model "${MODEL}" not available to this key?)` : r.status === 401 ? '  (bad key)' : ''}\n`,
+        `    ✗ HTTP ${r.status}${r.code ? ` (${r.code})` : ''}${r.message ? ` — ${r.message}` : ''}${hint}\n`,
       );
       fail++;
+      // No point hammering the API if it's a key/model/billing problem rather than a transient blip.
+      if (fatal) {
+        console.log('Aborting remaining cases — fix the above and re-run.\n');
+        break;
+      }
       continue;
     }
     totIn += r.tokensIn;
