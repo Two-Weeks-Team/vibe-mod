@@ -1,0 +1,21 @@
+{
+  "route": "/internal/menu/undo-action",
+  "mod": true,
+  "body": { "location": "post", "targetId": "t3_target" },
+  "redisZsets": {
+    "testsub:audit": [{ "member": "a_undo_demo", "score": 1730000000000 }]
+  },
+  "redisHashes": {
+    "testsub:audit:a_undo_demo": {
+      "action": "remove",
+      "outcome": "applied",
+      "thingId": "t3_target",
+      "thingType": "post",
+      "authorName": "spammer",
+      "ruleSourceNL": "remove posts from accounts under 50 karma"
+    }
+  },
+  "redis": {
+    "testsub:rollback:a_undo_demo": "{\"entry\":{\"actionId\":\"a_undo_demo\",\"ruleId\":\"r_low_karma\",\"ruleSourceNL\":\"remove posts from accounts under 50 karma\",\"thingId\":\"t3_target\",\"thingType\":\"post\",\"action\":\"remove\",\"params\":{},\"authorName\":\"spammer\",\"ts\":1730000000000,\"outcome\":\"applied\"},\"reverseParams\":{\"wasRemoved\":false,\"action\":\"remove\"}}"
+  }
+}

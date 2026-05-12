@@ -17,7 +17,9 @@
 //     "mod":     true,                      // caller is a moderator of the playtest sub (default: true)
 //     "settings":{ "openaiApiKey": "sk-x" },// values returned by settings.get(...)
 //     "openai":  { ...ruleJson... },        // canned OpenAI compile result (sets a fake fetch)
-//     "redis":   { "testsub:rules:active": "{...json...}" }  // pre-seed redis string keys
+//     "redis":      { "testsub:rules:active": "{...json...}" },          // pre-seed string keys
+//     "redisHashes":{ "testsub:audit:<id>": { "action": "remove", ... } }, // pre-seed hash keys
+//     "redisZsets": { "testsub:audit": [ { "member": "<id>", "score": 1730000000000 } ] }  // pre-seed zsets
 //   }
 //
 // This shells out to vitest so it reuses test/setup.ts's mocks verbatim; the
