@@ -1,0 +1,45 @@
+{
+  "name": "vibe-mod",
+  "version": "0.1.0",
+  "description": "Write a moderation rule. In English. It works. (Reddit Devvit app)",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "devvit playtest",
+    "build": "tsc -p tsconfig.json && devvit build",
+    "upload": "devvit upload",
+    "publish": "devvit publish",
+    "publish:public": "devvit publish --public",
+    "logs": "devvit logs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "acceptance": "tsx scripts/acceptance.ts",
+    "typecheck": "tsc --noEmit",
+    "settings:set:openai": "devvit settings set openaiApiKey"
+  },
+  "dependencies": {
+    "@devvit/redis": "^0.12.22",
+    "@devvit/reddit": "^0.12.22",
+    "@devvit/web": "^0.12.22",
+    "hono": "^4.12.18",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@devvit/cli": "^0.12.22",
+    "@types/node": "^25.6.2",
+    "tsx": "^4.20.7",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.5",
+    "@vitest/coverage-v8": "^4.1.5"
+  },
+  "engines": {
+    "node": ">=22.2.0"
+  },
+  "vibe-mod": {
+    "fetch-domains": ["api.openai.com"],
+    "tos-url": "https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod/tos.html",
+    "privacy-url": "https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod/privacy.html"
+  }
+}

@@ -1,0 +1,33 @@
+# Devvit + Node
+node_modules/
+.devvit/
+dist/
+build/
+*.log
+.devvit-cache/
+
+# Coverage / test artifacts
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local env (must never commit OpenAI keys)
+.env
+.env.local
+.env.*.local
+
+# Devvit auth + settings (Devvit stores in ~/.devvit/, but defensive ignore)
+.devvit-auth
+*.devvit-token
+
+# Generated docs
+docs/*.html

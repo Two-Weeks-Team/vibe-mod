@@ -1,0 +1,114 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "vibe-mod",
+  "version": "0.1.0",
+  "permissions": {
+    "reddit": { "enable": true, "scope": "moderator" },
+    "redis": true,
+    "http": { "enable": true, "domains": ["api.openai.com"] }
+  },
+  "settings": {
+    "global": {
+      "openaiApiKey": {
+        "type": "string",
+        "label": "Developer OpenAI API Key (sk-…)",
+        "isSecret": true,
+        "defaultValue": "",
+        "helpText": "Devvit constraint: secrets must be global. This key is shared across all subreddit installs of vibe-mod (per-install BYOK override available via subredditOpenaiApiKey below). Daily quota per sub is enforced to bound cost."
+      },
+      "openaiModel": {
+        "type": "select",
+        "label": "OpenAI model (developer-set default)",
+        "options": [
+          { "label": "gpt-5.4-nano (recommended — latest, cheapest, json_object support)", "value": "gpt-5.4-nano" },
+          { "label": "gpt-5.4-mini (latest, higher quality, ~7× more expensive)", "value": "gpt-5.4-mini" },
+          { "label": "gpt-5-mini (previous-gen, fallback)", "value": "gpt-5-mini" },
+          { "label": "gpt-5-nano (previous-gen, cheapest fallback)", "value": "gpt-5-nano" }
+        ],
+        "defaultValue": "gpt-5.4-nano"
+      }
+    },
+    "subreddit": {
+      "subredditOpenaiApiKey": {
+        "type": "string",
+        "label": "Override: this subreddit's own OpenAI key (optional)",
+        "defaultValue": "",
+        "helpText": "Leave blank to use vibe-mod's shared key (subject to daily quota). Paste your own sk-… key to bypass the quota and bill your own OpenAI account. Note: Devvit cannot encrypt subreddit-scope settings; this value will be visible to mods of this sub. Treat the key accordingly."
+      },
+      "dryRunOnly": {
+        "type": "boolean",
+        "label": "Dry-run mode (rules log what they would do, but never act)",
+        "defaultValue": true
+      },
+      "maxActionsPerHour": {
+        "type": "number",
+        "label": "Auto-pause if more than N actions per hour (safety brake)",
+        "validationEndpoint": "/internal/settings/validate-rate-limit",
+        "defaultValue": 100
+      },
+      "shadowDurationHours": {
+        "type": "number",
+        "label": "Shadow-mode duration before a new rule can go live (hours)",
+        "validationEndpoint": "/internal/settings/validate-shadow",
+        "defaultValue": 24
+      }
+    }
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "vibe-mod: Compose rule",
+        "description": "Write a moderation rule in plain English",
+        "forUserType": "moderator",
+        "location": ["subreddit"],
+        "endpoint": "/internal/menu/compose-rule"
+      },
+      {
+        "label": "vibe-mod: View rules + log",
+        "description": "See active rules, recent actions, undo",
+        "forUserType": "moderator",
+        "location": ["subreddit"],
+        "endpoint": "/internal/menu/dashboard"
+      },
+      {
+        "label": "vibe-mod: Undo this action",
+        "description": "Restore the post (rule-triggered removals only)",
+        "forUserType": "moderator",
+        "location": ["post", "comment"],
+        "endpoint": "/internal/menu/undo-action"
+      }
+    ]
+  },
+  "forms": {
+    "ruleComposerForm": "/internal/form/compose-rule-submit",
+    "activateRuleForm": "/internal/form/activate-rule",
+    "dashboardForm": "/internal/form/dashboard-action"
+  },
+  "triggers": {
+    "onAppInstall":   "/internal/trigger/on-app-install",
+    "onAppUpgrade":   "/internal/trigger/on-app-upgrade",
+    "onPostSubmit":   "/internal/trigger/on-post-submit",
+    "onCommentSubmit":"/internal/trigger/on-comment-submit",
+    "onPostReport":   "/internal/trigger/on-post-report",
+    "onCommentReport":"/internal/trigger/on-comment-report"
+  },
+  "scheduler": {
+    "tasks": {
+      "audit-retention": {
+        "endpoint": "/internal/scheduler/audit-retention",
+        "cron": "0 3 * * *"
+      },
+      "dry-run-replay": {
+        "endpoint": "/internal/scheduler/dry-run-replay"
+      },
+      "shadow-promote-check": {
+        "endpoint": "/internal/scheduler/shadow-promote-check",
+        "cron": "*/15 * * * *"
+      },
+      "rate-limit-circuit-breaker": {
+        "endpoint": "/internal/scheduler/rate-limit-circuit-breaker",
+        "cron": "*/5 * * * *"
+      }
+    }
+  }
+}
