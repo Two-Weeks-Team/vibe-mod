@@ -121,23 +121,37 @@ export function makeFakeRedis(): FakeRedis {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Devvit `Listing<T>` stand-in. Production code only calls `.all()`.
+// ──────────────────────────────────────────────────────────────────────────────
+export function fakeListing<T>(items: T[]): { all: () => Promise<T[]> } {
+  return { all: async () => items };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Mutable Devvit doubles. Test files import these to script per-case behaviour.
+// Shapes track @devvit/web@0.12.x:
+//   - `getCurrentSubreddit()` → `{ id: t5_…, name }` (there is no getCurrentSubredditName)
+//   - `getModerators()` → Listing<User> (call `.all()`)
+//   - `getUserKarmaFromCurrentSubreddit(name)` → `{ fromComments?, fromPosts? }`
+//   - reporting is `reddit.report(thing, { reason })` (not `thing.report(...)`)
+//   - modmail uses `modMail.createModNotification({ subject, bodyMarkdown, subredditId })`
 // ──────────────────────────────────────────────────────────────────────────────
 export const fakeRedis = makeFakeRedis();
 
 export const fakeReddit = {
-  getCurrentSubredditName: vi.fn(async () => 'testsub'),
-  getCurrentUser: vi.fn(async () => ({ id: 't2_caller', username: 'caller' })),
+  getCurrentSubreddit: vi.fn(async () => ({ id: 't5_testsub' as `t5_${string}`, name: 'testsub' })),
+  getCurrentUser: vi.fn(async () => ({ id: 't2_caller', username: 'caller' }) as { id: string; username: string } | undefined),
   getUserByUsername: vi.fn(async (_name: string) => null as unknown),
-  getUserKarmaFromCurrentSubreddit: vi.fn(async () => 0),
-  getModerators: vi.fn(async () => [] as Array<{ username: string }>),
+  getUserKarmaFromCurrentSubreddit: vi.fn(async () => ({ fromComments: 0, fromPosts: 0 }) as { fromComments?: number; fromPosts?: number }),
+  getModerators: vi.fn(async (_opts: { subredditName: string }) => fakeListing([] as Array<{ username: string }>)),
   getPostById: vi.fn(),
   getCommentById: vi.fn(),
+  report: vi.fn(async () => ({}) as unknown),
   setPostFlair: vi.fn(async () => {}),
   banUser: vi.fn(async () => {}),
   muteUser: vi.fn(async () => {}),
   unbanUser: vi.fn(async () => {}),
-  modMail: { create: vi.fn(async () => {}) },
+  modMail: { createModNotification: vi.fn(async () => 'modmail_conv_1') },
 };
 
 export const fakeSettings = {
@@ -145,8 +159,21 @@ export const fakeSettings = {
 };
 
 export const fakeScheduler = {
-  runJob: vi.fn(async () => {}),
+  runJob: vi.fn(async (_job: unknown) => 'job_1'),
 };
+
+// OpenAI HTTP double — `callOpenAI` does `fetch('https://api.openai.com/...')`.
+export const fakeFetch = vi.fn();
+globalThis.fetch = fakeFetch as unknown as typeof fetch;
+
+/** Minimal OpenAI chat-completions Response double carrying `body` as JSON content. */
+export function openaiResponse(body: unknown, usage = { prompt_tokens: 100, completion_tokens: 50 }) {
+  return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify(body) } }], usage }) };
+}
+/** OpenAI failure Response double. */
+export function openaiError(status = 503) {
+  return { ok: false, status, json: async () => ({ error: { message: 'upstream' } }) };
+}
 
 vi.mock('@devvit/redis', () => ({ redis: fakeRedis }));
 vi.mock('@devvit/web/server', () => ({
@@ -161,10 +188,13 @@ beforeEach(() => {
   fakeRedis.hashes.clear();
   fakeRedis.zsets.clear();
   vi.clearAllMocks();
-  fakeReddit.getCurrentSubredditName.mockResolvedValue('testsub');
+  fakeReddit.getCurrentSubreddit.mockResolvedValue({ id: 't5_testsub', name: 'testsub' });
   fakeReddit.getCurrentUser.mockResolvedValue({ id: 't2_caller', username: 'caller' });
   fakeReddit.getUserByUsername.mockResolvedValue(null);
-  fakeReddit.getUserKarmaFromCurrentSubreddit.mockResolvedValue(0);
-  fakeReddit.getModerators.mockResolvedValue([]);
+  fakeReddit.getUserKarmaFromCurrentSubreddit.mockResolvedValue({ fromComments: 0, fromPosts: 0 });
+  fakeReddit.getModerators.mockResolvedValue(fakeListing([]));
+  fakeReddit.modMail.createModNotification.mockResolvedValue('modmail_conv_1');
+  fakeScheduler.runJob.mockResolvedValue('job_1');
   fakeSettings.get.mockResolvedValue(undefined);
+  fakeFetch.mockReset();
 });

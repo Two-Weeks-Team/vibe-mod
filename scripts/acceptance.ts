@@ -183,7 +183,13 @@ const gate4: Gate = {
       },
     },
     {
-      name: 'unit test suite passes (vitest run)',
+      name: 'project typechecks (tsc --noEmit, strict)',
+      run: () => {
+        execFileSync('npx', ['tsc', '--noEmit'], { cwd: ROOT, stdio: 'pipe' });
+      },
+    },
+    {
+      name: 'unit + integration test suite passes (vitest run)',
       run: () => {
         execFileSync('npx', ['vitest', 'run', '--reporter=dot'], { cwd: ROOT, stdio: 'pipe' });
       },
@@ -213,23 +219,12 @@ for (const gate of GATES) {
   console.log('');
 }
 
-// Informational: full typecheck. Devvit SDK surface drift currently produces
-// errors here; surfaced but NOT counted against the gates.
-try {
-  execFileSync('npx', ['tsc', '--noEmit'], { cwd: ROOT, stdio: 'pipe' });
-  console.log('ℹ tsc --noEmit: clean');
-} catch {
-  console.log('ℹ tsc --noEmit: reports errors (pre-existing Devvit API drift — not a gate failure)');
-}
-console.log('');
-
 const passedGates = GATES.length - failed;
 console.log(`Acceptance: ${passedGates}/${GATES.length} gates passed.`);
-if (failed > 0) {
-  console.log('\nMANUAL (require `npm run dev` against a playtest sub — not auto-checked):');
-  console.log('  • "vibe-mod: Compose rule" menu item renders, form opens with "Compiles used today: N / 50"');
-  console.log('  • Real OpenAI compile round-trips a draft rule and a dry-run job is scheduled');
-  console.log('  • Undo on a removed post restores it (rollback round-trip)');
-  process.exit(1);
-}
+console.log('\nMANUAL (require `npm run dev` against a playtest sub — not auto-checked):');
+console.log('  • "vibe-mod: Compose rule" menu item renders, form opens with "Compiles used today: N / 50"');
+console.log('  • Real OpenAI compile round-trips a draft rule and a dry-run job is scheduled');
+console.log('  • Undo on a removed post restores it (rollback round-trip)');
+console.log('  • `devvit build` succeeds against the wizard-generated app id (.devvit-app-id)');
+if (failed > 0) process.exit(1);
 process.exit(0);

@@ -6,6 +6,7 @@
 import { reddit } from '@devvit/web/server';
 import { redis } from '@devvit/redis';
 import type { FactBag } from '../shared/rule-schema';
+import { getCurrentSubredditName } from './devvit-helpers';
 
 const USER_CACHE_TTL_SECONDS = 60 * 60; // 1h author cache
 
@@ -120,7 +121,7 @@ const SAFE_AUTHOR_DEFAULTS: AuthorFacts = {
 async function getAuthorFacts(authorId: string, authorName: string): Promise<AuthorFacts> {
   // SECURITY: All Redis keys are sub-scoped. Devvit Redis is per-install,
   // but defense-in-depth — if Reddit changes the isolation model, we don't leak.
-  const subName = await reddit.getCurrentSubredditName().catch(() => 'unknown');
+  const subName = await getCurrentSubredditName().catch(() => 'unknown');
   const cacheKey = `${subName}:author:${authorId}`;
   const cached = await redis.get(cacheKey);
   if (cached) {
@@ -141,9 +142,11 @@ async function getAuthorFacts(authorId: string, authorName: string): Promise<Aut
   const accountAgeHours = Math.floor((now - user.createdAt.getTime()) / 3_600_000);
 
   // Resolve per-sub karma. Falls back to 0 if API fails (audit FIND-01 mitigation).
+  // getUserKarmaFromCurrentSubreddit → { fromComments?, fromPosts? }.
   let subKarma = 0;
   try {
-    subKarma = await reddit.getUserKarmaFromCurrentSubreddit({ username: authorName }) ?? 0;
+    const k = await reddit.getUserKarmaFromCurrentSubreddit(authorName);
+    subKarma = (k?.fromComments ?? 0) + (k?.fromPosts ?? 0);
   } catch { /* keep default 0 */ }
 
   // Resolve mod status — read once per sub, cache for 5 min, lookup author in list.
@@ -157,7 +160,7 @@ async function getAuthorFacts(authorId: string, authorName: string): Promise<Aut
       modUsernames = JSON.parse(cachedModList);
     } else {
       const mods = await reddit.getModerators({ subredditName: subName });
-      modUsernames = mods.map((m: { username: string }) => m.username);
+      modUsernames = (await mods.all()).map((m: { username: string }) => m.username);
       await redis.set(modListKey, JSON.stringify(modUsernames));
       await redis.expire(modListKey, 300);   // 5 min
     }

@@ -3,7 +3,7 @@
 // Key invariants: closed key set, safe defaults on API failure, sub-scoped cache.
 
 import { describe, it, expect } from 'vitest';
-import { fakeRedis, fakeReddit } from '../../test/setup';
+import { fakeRedis, fakeReddit, fakeListing } from '../../test/setup';
 import { buildPostFactBag, buildCommentFactBag } from './fact-bag';
 import { FactPaths } from '../shared/rule-schema';
 
@@ -95,13 +95,13 @@ describe('author facts', () => {
   it('derives account age, karma, and mod status from the Reddit API', async () => {
     const created = new Date(Date.now() - 50 * 3_600_000); // 50h old
     fakeReddit.getUserByUsername.mockResolvedValue({ createdAt: created, linkKarma: 30, commentKarma: 70 });
-    fakeReddit.getUserKarmaFromCurrentSubreddit.mockResolvedValue(12);
-    fakeReddit.getModerators.mockResolvedValue([{ username: 'alice' }, { username: 'carol' }]);
+    fakeReddit.getUserKarmaFromCurrentSubreddit.mockResolvedValue({ fromComments: 5, fromPosts: 7 });
+    fakeReddit.getModerators.mockResolvedValue(fakeListing([{ username: 'alice' }, { username: 'carol' }]));
 
     const bag = await buildPostFactBag(POST);
     expect(bag['author.accountAgeHours']).toBe(50);
     expect(bag['author.totalKarma']).toBe(100);
-    expect(bag['author.subKarma']).toBe(12);
+    expect(bag['author.subKarma']).toBe(12); // fromComments + fromPosts
     expect(bag['author.isModerator']).toBe(true);
   });
 

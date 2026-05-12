@@ -61,7 +61,7 @@ describe('executeActions — short-circuit paths', () => {
   });
 
   it('returns rate_limited when the per-sub breaker is open', async () => {
-    await fakeRedis.set('circuit:open', '1');
+    await fakeRedis.set('testsub:circuit:open', '1');
     const audits = await executeActions(ctx());
     expect(audits[0].outcome).toBe('rate_limited');
   });
@@ -83,7 +83,6 @@ describe('executeActions — short-circuit paths', () => {
 describe('executeActions — guarded verbs', () => {
   it('skips ban/mute/permaban silently when not in shadow mode (v0.1 never auto-fires)', async () => {
     const r = rule({ then: [{ action: 'ban', params: { reason: 'spam' } }] });
-    fakeReddit.getCurrentSubredditName.mockResolvedValue('testsub');
     const audits = await executeActions(ctx({ rule: r }));
     expect(audits[0].outcome).toBe('guarded_skip');
     expect(fakeReddit.banUser).not.toHaveBeenCalled();
@@ -101,12 +100,12 @@ describe('executeActions — applied path + audit/rollback', () => {
 
     const id = audits[0].actionId;
     expect(id).toMatch(/^a_\d+_[0-9a-f]{18}$/);
-    const hash = await fakeRedis.hGetAll(`audit:${id}`);
+    const hash = await fakeRedis.hGetAll(`testsub:audit:${id}`);
     expect(hash.action).toBe('remove');
     expect(hash.outcome).toBe('applied');
-    expect(JSON.parse((await fakeRedis.get(`rollback:${id}`))!).entry.thingId).toBe('t3_post1');
+    expect(JSON.parse((await fakeRedis.get(`testsub:rollback:${id}`))!).entry.thingId).toBe('t3_post1');
 
-    const z = await fakeRedis.zRange('audit', 0, -1);
+    const z = await fakeRedis.zRange('testsub:audit', 0, -1);
     expect(z.map((e) => e.member)).toContain(id);
   });
 
@@ -120,11 +119,10 @@ describe('executeActions — applied path + audit/rollback', () => {
 
   it('captures the previous flair when setting a new one', async () => {
     fakeReddit.getPostById.mockResolvedValue({ flair: { text: 'OLD' } });
-    fakeReddit.getCurrentSubredditName.mockResolvedValue('testsub');
     const r = rule({ then: [{ action: 'flair', params: { flairText: 'NEW' } }] });
     const audits = await executeActions(ctx({ rule: r }));
     expect(fakeReddit.setPostFlair).toHaveBeenCalledWith(expect.objectContaining({ postId: 't3_post1', text: 'NEW', subredditName: 'testsub' }));
-    const rb = JSON.parse((await fakeRedis.get(`rollback:${audits[0].actionId}`))!);
+    const rb = JSON.parse((await fakeRedis.get(`testsub:rollback:${audits[0].actionId}`))!);
     expect(rb.reverseParams.prevFlair).toBe('OLD');
   });
 
@@ -145,7 +143,7 @@ describe('executeActions — applied path + audit/rollback', () => {
 
 describe('rollbackAction', () => {
   it('fails cleanly when the rollback token is gone', async () => {
-    const res = await rollbackAction('a_does_not_exist');
+    const res = await rollbackAction('testsub', 'a_does_not_exist');
     expect(res).toEqual({ ok: false, reason: expect.stringMatching(/expired|never existed/i) });
   });
 
@@ -155,11 +153,11 @@ describe('rollbackAction', () => {
     const audits = await executeActions(ctx());
     const id = audits[0].actionId;
 
-    const res = await rollbackAction(id);
+    const res = await rollbackAction("testsub", id);
     expect(res.ok).toBe(true);
     expect(post.approve).toHaveBeenCalled();
-    expect(await fakeRedis.get(`rollback:${id}`)).toBeUndefined();
-    expect((await fakeRedis.hGetAll(`audit:${id}`)).rolledBack).toBe('1');
+    expect(await fakeRedis.get(`testsub:rollback:${id}`)).toBeUndefined();
+    expect((await fakeRedis.hGetAll(`testsub:audit:${id}`)).rolledBack).toBe('1');
   });
 
   it('unlocks a locked comment on rollback', async () => {
@@ -167,7 +165,7 @@ describe('rollbackAction', () => {
     fakeReddit.getCommentById.mockResolvedValue(comment);
     const r = rule({ then: [{ action: 'lock', params: {} }] });
     const audits = await executeActions(ctx({ rule: r, thingId: 't1_c1', thingType: 'comment' }));
-    const res = await rollbackAction(audits[0].actionId);
+    const res = await rollbackAction("testsub", audits[0].actionId);
     expect(res.ok).toBe(true);
     expect(comment.unlock).toHaveBeenCalled();
   });
@@ -177,7 +175,7 @@ describe('rollbackAction', () => {
     fakeReddit.getPostById.mockResolvedValue(post);
     const r = rule({ then: [{ action: 'report', params: { reason: 'spam' } }] });
     const audits = await executeActions(ctx({ rule: r }));
-    const res = await rollbackAction(audits[0].actionId);
+    const res = await rollbackAction("testsub", audits[0].actionId);
     expect(res.ok).toBe(false);
     expect(res.reason).toMatch(/not reversible/i);
   });
@@ -186,7 +184,7 @@ describe('rollbackAction', () => {
     const post = { remove: vi.fn(), approve: vi.fn().mockRejectedValue(new Error('boom')), removed: false };
     fakeReddit.getPostById.mockResolvedValue(post);
     const audits = await executeActions(ctx());
-    const res = await rollbackAction(audits[0].actionId);
+    const res = await rollbackAction("testsub", audits[0].actionId);
     expect(res).toEqual({ ok: false, reason: expect.stringContaining('boom') });
   });
 });
