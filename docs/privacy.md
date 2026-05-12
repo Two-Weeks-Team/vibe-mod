@@ -13,14 +13,14 @@
 
 ## 2. What we collect, and why
 
-| Category | What it is | Why we need it | Where it lives | Retention |
-|---|---|---|---|---|
-| Mod rule input | The English sentence a moderator types into the "Compose rule" form | To translate it into a structured rule | Sent to OpenAI (`api.openai.com`) for compilation; the compiled JSON is stored in Devvit Redis | Indefinite (until the moderator deletes the rule) |
-| Rule definitions | The compiled JSON rule | To evaluate posts and comments | Devvit Redis (Reddit-hosted, subreddit-scoped) | Indefinite (until deletion) |
-| Audit entries | A log row per moderation action vibe-mod took | To let your mod team see what happened and undo it | Devvit Redis | 30 days, then auto-deleted |
-| Rollback tokens | A serialized reversal blob per action | To support the "Undo" menu action | Devvit Redis with 30-day TTL | 30 days |
-| Author cache | A short cache of an author's account age and karma | To avoid a Reddit API roundtrip on every event | Devvit Redis | 1 hour |
-| Compile rate counters | A daily counter of how many rule compiles a sub has used | To enforce the per-day rate limit | Devvit Redis | 1 day |
+| Category              | What it is                                                          | Why we need it                                     | Where it lives                                                                                 | Retention                                         |
+| --------------------- | ------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Mod rule input        | The English sentence a moderator types into the "Compose rule" form | To translate it into a structured rule             | Sent to OpenAI (`api.openai.com`) for compilation; the compiled JSON is stored in Devvit Redis | Indefinite (until the moderator deletes the rule) |
+| Rule definitions      | The compiled JSON rule                                              | To evaluate posts and comments                     | Devvit Redis (Reddit-hosted, subreddit-scoped)                                                 | Indefinite (until deletion)                       |
+| Audit entries         | A log row per moderation action vibe-mod took                       | To let your mod team see what happened and undo it | Devvit Redis                                                                                   | 30 days, then auto-deleted                        |
+| Rollback tokens       | A serialized reversal blob per action                               | To support the "Undo" menu action                  | Devvit Redis with 30-day TTL                                                                   | 30 days                                           |
+| Author cache          | A short cache of an author's account age and karma                  | To avoid a Reddit API roundtrip on every event     | Devvit Redis                                                                                   | 1 hour                                            |
+| Compile rate counters | A daily counter of how many rule compiles a sub has used            | To enforce the per-day rate limit                  | Devvit Redis                                                                                   | 1 day                                             |
 
 ## 3. What we do **not** collect
 

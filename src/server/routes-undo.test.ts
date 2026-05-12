@@ -7,26 +7,51 @@ import { fakeRedis, fakeReddit, fakeListing } from '../../test/setup';
 import type { AuditEntry } from './executor';
 
 const call = (path: string, body: unknown = {}) =>
-  app.fetch(new Request(`http://localhost${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  }));
+  app.fetch(
+    new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  );
 
 function asMod() {
   fakeReddit.getModerators.mockResolvedValue(fakeListing([{ username: 'caller' }]));
 }
 
 /** Seed a `remove`-post audit entry + rollback token the way executor.writeAuditAndRollback would. */
-async function seedRemoveAudit(actionId: string, thingId: string, opts: { rolledBack?: boolean; withToken?: boolean } = {}) {
+async function seedRemoveAudit(
+  actionId: string,
+  thingId: string,
+  opts: { rolledBack?: boolean; withToken?: boolean } = {},
+) {
   await fakeRedis.zAdd('testsub:audit', { member: actionId, score: Date.now() });
   await fakeRedis.hSet(`testsub:audit:${actionId}`, {
-    action: 'remove', outcome: 'applied', thingId, thingType: 'post', authorName: 'spammer', ruleSourceNL: 'remove low effort',
+    action: 'remove',
+    outcome: 'applied',
+    thingId,
+    thingType: 'post',
+    authorName: 'spammer',
+    ruleSourceNL: 'remove low effort',
     ...(opts.rolledBack ? { rolledBack: '1' } : {}),
   });
   if (opts.withToken !== false) {
-    const entry: AuditEntry = { actionId, ruleId: 'r_x', ruleSourceNL: 'remove low effort', thingId, thingType: 'post', action: 'remove', params: {}, authorName: 'spammer', ts: Date.now(), outcome: 'applied' };
-    await fakeRedis.set(`testsub:rollback:${actionId}`, JSON.stringify({ entry, reverseParams: { wasRemoved: false, action: 'remove' } }));
+    const entry: AuditEntry = {
+      actionId,
+      ruleId: 'r_x',
+      ruleSourceNL: 'remove low effort',
+      thingId,
+      thingType: 'post',
+      action: 'remove',
+      params: {},
+      authorName: 'spammer',
+      ts: Date.now(),
+      outcome: 'applied',
+    };
+    await fakeRedis.set(
+      `testsub:rollback:${actionId}`,
+      JSON.stringify({ entry, reverseParams: { wasRemoved: false, action: 'remove' } }),
+    );
   }
 }
 
@@ -44,7 +69,9 @@ describe('POST /internal/menu/undo-action', () => {
 
   it('reports when there is no vibe-mod action on this item', async () => {
     asMod();
-    const body = await (await call('/internal/menu/undo-action', { location: 'post', targetId: 't3_never_touched' })).json();
+    const body = await (
+      await call('/internal/menu/undo-action', { location: 'post', targetId: 't3_never_touched' })
+    ).json();
     expect(body.showToast).toMatch(/No vibe-mod action found/i);
   });
 

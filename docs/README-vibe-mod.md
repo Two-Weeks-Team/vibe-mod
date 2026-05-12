@@ -10,7 +10,7 @@ vibe-mod is a Reddit moderation app for Devvit. You type a rule in plain English
 
 1. Install vibe-mod from the Reddit App Directory on your subreddit.
 2. Open Mod Tools → **vibe-mod: Compose rule**.
-3. Type something like *"Send to mod queue any post under 50 characters from accounts less than 7 days old."*
+3. Type something like _"Send to mod queue any post under 50 characters from accounts less than 7 days old."_
 4. Click **Compile + Preview**. vibe-mod shows you which of your last 100 posts the rule would have matched.
 5. If the preview looks right, open **vibe-mod: View rules + log** and click **Activate**. The rule goes live in shadow mode for 24 hours (logs what it would do, takes no action), then promotes itself automatically.
 6. Any time vibe-mod acts on a post, you can **vibe-mod: Undo this action** from that post's three-dot menu for up to 30 days.

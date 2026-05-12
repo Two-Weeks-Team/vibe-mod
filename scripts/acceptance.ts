@@ -34,13 +34,17 @@ function assert(cond: unknown, msg: string): asserts cond {
 
 // ── Shared parsed artifacts ────────────────────────────────────────────────────
 const devvit = JSON.parse(read('devvit.json')) as {
+  $schema?: string;
   permissions: { http?: { domains?: string[] } };
   menu: { items: Array<{ endpoint: string; forUserType?: string; location?: string[] }> };
   forms: Record<string, string>;
   triggers: Record<string, string>;
-  scheduler: { tasks: Record<string, { endpoint: string }> };
+  scheduler: { tasks: Record<string, { endpoint: string; cron?: string }> };
 };
-const pkg = JSON.parse(read('package.json')) as { dependencies: Record<string, string>; scripts: Record<string, string> };
+const pkg = JSON.parse(read('package.json')) as {
+  dependencies: Record<string, string>;
+  scripts: Record<string, string>;
+};
 const indexTs = read('src/server/index.ts');
 
 const routeDefined = (path: string) => indexTs.includes(`'${path}'`) || indexTs.includes(`"${path}"`);
@@ -52,7 +56,11 @@ const gate1: Gate = {
   checks: [
     {
       name: 'devvit.json declares api.openai.com under permissions.http.domains',
-      run: () => assert(devvit.permissions.http?.domains?.includes('api.openai.com'), 'api.openai.com missing from http.domains (most common Day-1 fail)'),
+      run: () =>
+        assert(
+          devvit.permissions.http?.domains?.includes('api.openai.com'),
+          'api.openai.com missing from http.domains (most common Day-1 fail)',
+        ),
     },
     {
       name: 'devvit.json declares the three moderator menu items',
@@ -66,19 +74,39 @@ const gate1: Gate = {
     {
       name: 'every declared menu endpoint has a matching route in index.ts',
       run: () => {
-        for (const m of devvit.menu.items) assert(routeDefined(m.endpoint), `menu endpoint ${m.endpoint} has no app.post() route`);
+        for (const m of devvit.menu.items)
+          assert(routeDefined(m.endpoint), `menu endpoint ${m.endpoint} has no app.post() route`);
       },
     },
     {
       name: 'every form endpoint declared in devvit.json has a matching route in index.ts',
       run: () => {
-        for (const [name, ep] of Object.entries(devvit.forms)) assert(routeDefined(ep), `form "${name}" → ${ep} has no app.post() route`);
+        for (const [name, ep] of Object.entries(devvit.forms))
+          assert(routeDefined(ep), `form "${name}" → ${ep} has no app.post() route`);
+      },
+    },
+    {
+      name: 'devvit.json has a $schema and well-formed scheduler cron strings',
+      run: () => {
+        assert(
+          devvit.$schema?.includes('developers.reddit.com/schema'),
+          'devvit.json is missing the $schema reference',
+        );
+        for (const [name, task] of Object.entries(devvit.scheduler.tasks)) {
+          if (task.cron !== undefined) {
+            assert(
+              task.cron.trim().split(/\s+/).length === 5,
+              `scheduler task "${name}" cron "${task.cron}" is not a 5-field expression`,
+            );
+          }
+        }
       },
     },
     {
       name: 'runtime deps present: @devvit/web, hono, zod',
       run: () => {
-        for (const dep of ['@devvit/web', 'hono', 'zod']) assert(pkg.dependencies[dep], `dependency ${dep} missing from package.json`);
+        for (const dep of ['@devvit/web', 'hono', 'zod'])
+          assert(pkg.dependencies[dep], `dependency ${dep} missing from package.json`);
       },
     },
   ],
@@ -92,18 +120,24 @@ const gate2: Gate = {
     {
       name: 'system prompt lists every fact path from the schema',
       run: () => {
-        for (const f of FactPaths) assert(VIBE_MOD_SYSTEM_PROMPT.includes(f), `system prompt is missing fact path ${f}`);
+        for (const f of FactPaths)
+          assert(VIBE_MOD_SYSTEM_PROMPT.includes(f), `system prompt is missing fact path ${f}`);
       },
     },
     {
       name: 'system prompt lists every safe + guarded action verb',
       run: () => {
-        for (const a of [...SAFE_ACTIONS, ...GUARDED_ACTIONS]) assert(VIBE_MOD_SYSTEM_PROMPT.includes(a), `system prompt is missing action verb ${a}`);
+        for (const a of [...SAFE_ACTIONS, ...GUARDED_ACTIONS])
+          assert(VIBE_MOD_SYSTEM_PROMPT.includes(a), `system prompt is missing action verb ${a}`);
       },
     },
     {
       name: 'callOpenAI requests JSON-object responses (deterministic compile)',
-      run: () => assert(indexTs.includes(`response_format`) && indexTs.includes(`json_object`), 'callOpenAI does not pin response_format: json_object'),
+      run: () =>
+        assert(
+          indexTs.includes(`response_format`) && indexTs.includes(`json_object`),
+          'callOpenAI does not pin response_format: json_object',
+        ),
     },
     {
       name: 'few-shot examples are present (>=2 rules, >=1 clarification) and self-consistent',
@@ -112,7 +146,8 @@ const gate2: Gate = {
         const clarEx = FEW_SHOT_EXAMPLES.filter((e) => 'needsClarification' in e.assistant);
         assert(ruleEx.length >= 2, 'need at least 2 rule examples');
         assert(clarEx.length >= 1, 'need at least 1 clarification example');
-        for (const ex of ruleEx) assert(ex.assistant.sourceNL === ex.user, `example "${ex.user}" does not copy input verbatim into sourceNL`);
+        for (const ex of ruleEx)
+          assert(ex.assistant.sourceNL === ex.user, `example "${ex.user}" does not copy input verbatim into sourceNL`);
       },
     },
   ],
@@ -125,11 +160,19 @@ const gate3: Gate = {
   checks: [
     {
       name: 'executor exports rollbackAction()',
-      run: () => assert(/export\s+async\s+function\s+rollbackAction/.test(read('src/server/executor.ts')), 'rollbackAction not exported from executor.ts'),
+      run: () =>
+        assert(
+          /export\s+async\s+function\s+rollbackAction/.test(read('src/server/executor.ts')),
+          'rollbackAction not exported from executor.ts',
+        ),
     },
     {
       name: 'undo-action menu route exists and calls rollbackAction',
-      run: () => assert(routeDefined('/internal/menu/undo-action') && indexTs.includes('rollbackAction('), 'undo route missing or does not call rollbackAction'),
+      run: () =>
+        assert(
+          routeDefined('/internal/menu/undo-action') && indexTs.includes('rollbackAction('),
+          'undo route missing or does not call rollbackAction',
+        ),
     },
     {
       name: 'dry-run-replay scheduler task is declared AND has a route',
@@ -164,10 +207,17 @@ const gate4: Gate = {
       run: () => {
         const bundle = seedStarterRules(1_700_000_000_000); // throws if invalid
         assert(bundle.rules.length === 5, `expected 5 starter rules, got ${bundle.rules.length}`);
-        assert(JSON.stringify(bundle.rules.map((r) => r.id)) === JSON.stringify(STARTER_RULE_IDS), 'starter rule ids drifted');
+        assert(
+          JSON.stringify(bundle.rules.map((r) => r.id)) === JSON.stringify(STARTER_RULE_IDS),
+          'starter rule ids drifted',
+        );
         for (const r of bundle.rules) {
           assert(r.shadow === true, `starter rule ${r.id} is not shadow:true`);
-          for (const act of r.then) assert((SAFE_ACTIONS as readonly string[]).includes(act.action), `starter rule ${r.id} uses non-SAFE action ${act.action}`);
+          for (const act of r.then)
+            assert(
+              (SAFE_ACTIONS as readonly string[]).includes(act.action),
+              `starter rule ${r.id} uses non-SAFE action ${act.action}`,
+            );
         }
       },
     },

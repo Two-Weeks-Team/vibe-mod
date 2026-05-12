@@ -4,7 +4,7 @@
 
 import { reddit, settings } from '@devvit/web/server';
 import { redis } from '@devvit/redis';
-import { SAFE_ACTIONS, GUARDED_ACTIONS, type ActionType, type RuleType } from '../shared/rule-schema';
+import { GUARDED_ACTIONS, type ActionType, type RuleType } from '../shared/rule-schema';
 import { asT1, asT3, getCurrentSubredditName } from './devvit-helpers';
 
 const ROLLBACK_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
@@ -13,7 +13,7 @@ export interface AuditEntry {
   actionId: string;
   ruleId: string;
   ruleSourceNL: string;
-  thingId: string;       // t3_… or t1_…
+  thingId: string; // t3_… or t1_…
   thingType: 'post' | 'comment';
   action: string;
   params: Record<string, unknown>;
@@ -29,8 +29,8 @@ export interface ExecutionContext {
   thingType: 'post' | 'comment';
   authorName: string;
   authorId: string;
-  isDryRun: boolean;       // true when called from /scheduler/dry-run-replay
-  isShadowMode: boolean;   // true if rule.shadow OR sub.dryRunOnly
+  isDryRun: boolean; // true when called from /scheduler/dry-run-replay
+  isShadowMode: boolean; // true if rule.shadow OR sub.dryRunOnly
 }
 
 export async function executeActions(ctx: ExecutionContext): Promise<AuditEntry[]> {
@@ -44,7 +44,7 @@ export async function executeActions(ctx: ExecutionContext): Promise<AuditEntry[
   // Intentionally NOT sub-scoped — one flag freezes every install.
   const killSwitch = await redis.get('circuit:beta_freeze');
   if (killSwitch === '1') {
-    return ctx.rule.then.map(act => auditEntry(ctx, act.action, act.params, 'rate_limited'));
+    return ctx.rule.then.map((act) => auditEntry(ctx, act.action, act.params, 'rate_limited'));
   }
 
   // Per-sub rate-limit circuit breaker (set by the cron scheduler when this
@@ -52,7 +52,7 @@ export async function executeActions(ctx: ExecutionContext): Promise<AuditEntry[
   // /internal/scheduler/rate-limit-circuit-breaker.
   const breakerOpen = await redis.get(`${subName}:circuit:open`);
   if (breakerOpen === '1') {
-    return ctx.rule.then.map(act => auditEntry(ctx, act.action, act.params, 'rate_limited'));
+    return ctx.rule.then.map((act) => auditEntry(ctx, act.action, act.params, 'rate_limited'));
   }
 
   // Per-rule per-author rate limit — atomic set NX prevents TOCTOU race
@@ -66,7 +66,7 @@ export async function executeActions(ctx: ExecutionContext): Promise<AuditEntry[
     // watch+multi+exec for atomicity.)
     const setNxLike = await trySetIfNotExists(key, '1', ttl);
     if (!setNxLike) {
-      return ctx.rule.then.map(act => auditEntry(ctx, act.action, act.params, 'rate_limited'));
+      return ctx.rule.then.map((act) => auditEntry(ctx, act.action, act.params, 'rate_limited'));
     }
   }
 
@@ -111,7 +111,7 @@ async function applyAction(act: ActionType, ctx: ExecutionContext): Promise<Reco
     case 'report': {
       const target = await getThing(ctx);
       await reddit.report(target, { reason: act.params.reason });
-      return { reverseable: false };  // reports cannot be unsent
+      return { reverseable: false }; // reports cannot be unsent
     }
     case 'flair': {
       if (ctx.thingType !== 'post') return { reverseable: false };
@@ -174,7 +174,10 @@ async function applyAction(act: ActionType, ctx: ExecutionContext): Promise<Reco
   }
 }
 
-export async function rollbackAction(subredditName: string, actionId: string): Promise<{ ok: boolean; reason?: string }> {
+export async function rollbackAction(
+  subredditName: string,
+  actionId: string,
+): Promise<{ ok: boolean; reason?: string }> {
   const rollbackJson = await redis.get(`${subredditName}:rollback:${actionId}`);
   if (!rollbackJson) return { ok: false, reason: 'Rollback window expired or never existed' };
 
@@ -189,9 +192,10 @@ export async function rollbackAction(subredditName: string, actionId: string): P
       const comment = await reddit.getCommentById(asT1(entry.thingId));
       await comment.approve();
     } else if (entry.action === 'lock') {
-      const target = entry.thingType === 'post'
-        ? await reddit.getPostById(asT3(entry.thingId))
-        : await reddit.getCommentById(asT1(entry.thingId));
+      const target =
+        entry.thingType === 'post'
+          ? await reddit.getPostById(asT3(entry.thingId))
+          : await reddit.getCommentById(asT1(entry.thingId));
       await target.unlock();
     } else if (entry.action === 'ban' || entry.action === 'permaban') {
       await reddit.unbanUser(entry.authorName, await getCurrentSubredditName());
@@ -213,7 +217,7 @@ export async function rollbackAction(subredditName: string, actionId: string): P
 function newActionId(): string {
   const bytes = new Uint8Array(9);
   globalThis.crypto.getRandomValues(bytes);
-  const suffix = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  const suffix = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   return `a_${Date.now()}_${suffix}`;
 }
 
@@ -232,7 +236,13 @@ async function trySetIfNotExists(key: string, value: string, ttlSeconds: number)
   return true;
 }
 
-function auditEntry(ctx: ExecutionContext, action: string, params: Record<string, unknown>, outcome: AuditEntry['outcome'], errorMessage?: string): AuditEntry {
+function auditEntry(
+  ctx: ExecutionContext,
+  action: string,
+  params: Record<string, unknown>,
+  outcome: AuditEntry['outcome'],
+  errorMessage?: string,
+): AuditEntry {
   return {
     actionId: newActionId(),
     ruleId: ctx.rule.id,
@@ -248,7 +258,11 @@ function auditEntry(ctx: ExecutionContext, action: string, params: Record<string
   };
 }
 
-async function writeAuditAndRollback(subName: string, entry: AuditEntry, reverseParams: Record<string, unknown>): Promise<void> {
+async function writeAuditAndRollback(
+  subName: string,
+  entry: AuditEntry,
+  reverseParams: Record<string, unknown>,
+): Promise<void> {
   // Use transaction so audit + rollback are atomic
   const watchKey = `${subName}:audit:${entry.actionId}`;
   const txn = await redis.watch(watchKey);

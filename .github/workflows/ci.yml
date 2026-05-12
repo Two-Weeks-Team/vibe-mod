@@ -12,27 +12,33 @@ concurrency:
 
 jobs:
   build:
-    name: typecheck · test · acceptance
+    name: lint · typecheck · test · acceptance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: '.nvmrc'
           cache: 'npm'
 
-      # Note: `npm ci` currently trips EBADPLATFORM on esbuild's per-platform
-      # optional deps with the committed lockfile; `npm install` honours the
-      # lockfile when it's in sync and skips non-matching optional packages.
+      # `npm ci` currently trips EBADPLATFORM on esbuild's per-platform optional
+      # deps with the committed lockfile; `npm install` honours an in-sync lockfile
+      # and skips non-matching optional packages.
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Typecheck (tsc --noEmit, strict)
-        run: npx tsc --noEmit
+      - name: Lint (ESLint, 0 warnings)
+        run: npm run lint
 
-      - name: Unit + integration tests
-        run: npm test
+      - name: Format check (Prettier)
+        run: npm run format:check
+
+      - name: Typecheck (tsc --noEmit, strict)
+        run: npm run typecheck
+
+      - name: Unit + integration tests (with coverage)
+        run: npm run test:coverage
 
       - name: Acceptance gates (G1–G4)
         run: npm run acceptance
