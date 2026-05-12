@@ -17,8 +17,10 @@
 //
 // NOT part of `npm run check` / CI (needs a real key).
 //
-// IMPORTANT: keep the request payload below in sync with `callOpenAI` in
-// src/server/index.ts (same response_format, max_completion_tokens, no temperature).
+// IMPORTANT: the default request config below mirrors `callOpenAI` in
+// src/server/index.ts (response_format: json_object, reasoning_effort: 'none',
+// verbosity: 'low', max_completion_tokens: 600, no temperature). Env vars
+// REASONING_EFFORT / VERBOSITY / MAX_COMPLETION_TOKENS override for experiments.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -43,6 +45,14 @@ const MODELS = (process.env.OPENAI_MODELS?.trim() || process.env.OPENAI_MODEL?.t
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+// Request tuning — DEFAULTS MATCH callOpenAI() in src/server/index.ts. Override
+// via env to experiment. `none` reasoning (gpt-5.4 family value; older models
+// use `minimal`) suits this mechanical NL→JSON task: fast, no token-budget burn.
+// Set REASONING_EFFORT='' to omit the param entirely.
+const REASONING_EFFORT =
+  process.env.REASONING_EFFORT === '' ? undefined : process.env.REASONING_EFFORT?.trim() || 'none'; // none | low | medium | high | xhigh
+const VERBOSITY = process.env.VERBOSITY === '' ? undefined : process.env.VERBOSITY?.trim() || 'low'; // low | medium | high
+const MAX_COMPLETION_TOKENS = Number(process.env.MAX_COMPLETION_TOKENS) || 600;
 
 if (!API_KEY) {
   console.error(
@@ -63,7 +73,7 @@ const CASES: Case[] = [
     rule: 'If a post title is at least 12 characters and more than 70% capital letters, add the flair "Edit your title?"',
     expect: 'rule',
   },
-  { rule: 'Report comments that are over 60 characters and almost entirely uppercase', expect: 'rule' },
+  { rule: 'Report comments over 60 characters where more than 90% of the letters are uppercase', expect: 'rule' },
   {
     rule: 'Send to the mod queue any post linking to a known URL shortener (bit.ly, tinyurl.com, t.co)',
     expect: 'rule',
@@ -90,11 +100,20 @@ async function compile(model: string, userRule: string): Promise<ApiResult> {
   }
   messages.push({ role: 'user', content: userRule });
 
+  const body: Record<string, unknown> = {
+    model,
+    response_format: { type: 'json_object' },
+    messages,
+    max_completion_tokens: MAX_COMPLETION_TOKENS,
+  };
+  if (REASONING_EFFORT) body.reasoning_effort = REASONING_EFFORT;
+  if (VERBOSITY) body.verbosity = VERBOSITY;
+
   const t0 = performance.now();
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-    body: JSON.stringify({ model, response_format: { type: 'json_object' }, messages, max_completion_tokens: 700 }),
+    body: JSON.stringify(body),
   });
   if (!resp.ok) {
     let code: string | undefined;
