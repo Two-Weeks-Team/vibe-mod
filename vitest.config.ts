@@ -10,6 +10,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./test/setup.ts'],
+    // `*.devvit.test.ts` use the official @devvit/test harness — run them via
+    // `npm run test:devvit` (vitest.devvit.config.ts), not this config.
+    exclude: ['**/node_modules/**', '**/dist/**', '**/*.devvit.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
