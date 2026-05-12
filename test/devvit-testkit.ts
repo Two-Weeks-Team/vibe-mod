@@ -70,21 +70,22 @@ export function makeFakeRedis(): FakeRedis {
     },
     hGetAll: async (k: string) => ({ ...(hashes.get(k) ?? {}) }),
     zAdd: async (k: string, entry: { member: string; score: number }) => {
-      const arr = zsets.get(k) ?? [];
+      // Real Redis ZADD updates the score of an existing member, not a duplicate.
+      const arr = (zsets.get(k) ?? []).filter((e) => e.member !== entry.member);
       arr.push(entry);
       zsets.set(k, arr);
     },
     zRange: async (k: string, start: number, stop: number, opts?: { by?: 'rank' | 'score'; reverse?: boolean }) => {
-      let arr = [...(zsets.get(k) ?? [])].sort((a, b) => a.score - b.score);
+      const arr = [...(zsets.get(k) ?? [])].sort((a, b) => a.score - b.score);
+      if (opts?.reverse) arr.reverse();
       if (opts?.by === 'score') {
-        arr = arr.filter((e) => e.score >= start && e.score <= stop);
-      } else {
-        if (opts?.reverse) arr.reverse();
-        const end = stop < 0 ? arr.length : stop + 1;
-        arr = arr.slice(start, end);
-        return arr;
+        // start/stop are score bounds (low..high); honour them regardless of order.
+        const [lo, hi] = start <= stop ? [start, stop] : [stop, start];
+        return arr.filter((e) => e.score >= lo && e.score <= hi);
       }
-      return arr;
+      // by rank (default): start/stop are indices into the (possibly reversed) array.
+      const end = stop < 0 ? arr.length : stop + 1;
+      return arr.slice(start, end);
     },
     zCount: async (k: string, min: number, max: number | '+inf') => {
       const hi = max === '+inf' ? Infinity : max;

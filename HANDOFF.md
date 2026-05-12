@@ -178,6 +178,16 @@ git hooks (simple-git-hooks): pre-commit → lint-staged ;  pre-push → typeche
 - ✅ acceptance G1에 devvit.json `$schema` + cron 5-field 체크 추가. `docs/new-mod-checklist.md` 신규.
 - ✅ **버그 수정**: 미사용 변수 2건(`SAFE_ACTIONS` import, `catch (err)`) — ESLint가 잡음.
 
+**세션 3 (2026-05-12) — 외부 리뷰(gemini-code-assist / coderabbit / codex) 반영 (PR #3)**:
+
+- ✅ `r_shouting_title` starter rule이 **body** uppercase ratio를 보던 버그 → 새 fact `content.title.upperCaseRatio` 추가 (rule-schema FactPaths + fact-bag 계산 + system-prompt 자동 포함). 이제 ALL-CAPS **제목** 신호를 정확히 본다. (codex P2)
+- ✅ `devvit-testkit.ts`: `zAdd` 중복 멤버 허용 → 실제 Redis ZADD처럼 멤버별 score 갱신; `zRange`가 `by:'score'`일 때 `reverse` 무시하던 것 수정 + 구조 정리. (gemini)
+- ✅ `devvit-doctor.ts`: node 버전 비교가 major.minor만 보던 것 → major.minor.patch. (gemini)
+- ✅ `system-prompt.test.ts`: clarification 예시의 빈 `suggestedAnswers []`가 통과하던 것 → `length > 0` 검증 추가. (coderabbit)
+- ✅ `test/setup.ts` `beforeEach`: `vi.clearAllMocks()`만으로는 mock **구현**이 누수 → `getPostById`/`getCommentById` `mockReset()` + 모든 reddit 더블 기본 impl 재설정. (coderabbit)
+- ✅ `replay-runner`: `redisHashes`/`redisZsets` fixture 필드 추가 (이전엔 string 키만 seed 가능) + replay용 generic thing stub. `fixtures/undo-action.json` 신규 (rollback 라운드트립 replay).
+- 152 tests pass (1 skipped). lint/format/tsc clean. acceptance 4/4.
+
 **아직 남음 (= 사용자 Devvit wizard 단계 + 이후)**:
 
 - `npm run dev` 실기 playtest로만 검증되는 gate (Compose 메뉴 렌더, OpenAI compile 라운드트립, undo 라운드트립) — acceptance/doctor 출력의 MANUAL/soft 섹션 참조

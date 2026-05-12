@@ -29,12 +29,19 @@ interface CommentInput {
   sub?: { weeklyActiveUsers?: number; over18?: boolean };
 }
 
+// Fraction of A–Z letters in `s` that are uppercase. 0 when `s` has no letters
+// (so a link post with an empty body / a numeric title scores 0, not NaN).
+function upperCaseRatioOf(s: string): number {
+  const letters = s.replace(/[^A-Za-z]/g, '');
+  return letters.length === 0 ? 0 : (letters.match(/[A-Z]/g)?.length ?? 0) / letters.length;
+}
+
 export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<FactBag> {
   const a = await getAuthorFacts(p.authorId, p.authorName);
   const linkRegex = /https?:\/\/[^\s)]+/gi;
   const links = p.body?.match(linkRegex) ?? [];
-  const upper = (p.body ?? '').replace(/[^A-Za-z]/g, '');
-  const upperCaseRatio = upper.length === 0 ? 0 : (upper.match(/[A-Z]/g)?.length ?? 0) / upper.length;
+  const upperCaseRatio = upperCaseRatioOf(p.body ?? '');
+  const titleUpperCaseRatio = upperCaseRatioOf(p.title ?? '');
   let urlDomain = '';
   try {
     if (p.url) urlDomain = new URL(p.url).hostname;
@@ -59,6 +66,7 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
     'content.containsRegex': p.body ?? '',
     'content.title.length': p.title?.length ?? 0,
     'content.title.contains': p.title ?? '',
+    'content.title.upperCaseRatio': titleUpperCaseRatio,
     'content.url': p.url ?? '',
     'content.urlDomain': urlDomain,
 
@@ -74,8 +82,7 @@ export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Pr
   const a = await getAuthorFacts(c.authorId, c.authorName);
   const linkRegex = /https?:\/\/[^\s)]+/gi;
   const links = c.body.match(linkRegex) ?? [];
-  const upper = c.body.replace(/[^A-Za-z]/g, '');
-  const upperCaseRatio = upper.length === 0 ? 0 : (upper.match(/[A-Z]/g)?.length ?? 0) / upper.length;
+  const upperCaseRatio = upperCaseRatioOf(c.body);
 
   return {
     'author.accountAgeHours': a.accountAgeHours,
@@ -93,6 +100,7 @@ export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Pr
     'content.containsRegex': c.body,
     'content.title.length': 0,
     'content.title.contains': '',
+    'content.title.upperCaseRatio': 0,
     'content.url': '',
     'content.urlDomain': '',
 
