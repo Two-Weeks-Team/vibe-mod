@@ -36,41 +36,53 @@
 
 # 2) 이 핸드오프 디렉토리(/Users/kimsejun/Documents/GitHub/vibe-mod/)에
 #    있는 산출물을 wizard가 만든 디렉토리에 그대로 복사:
-#    - devvit.json (덮어쓰기)
+#    - devvit.json (덮어쓰기 — 이제 server/scripts/dev 블록 포함, self-contained)
 #    - package.json (덮어쓰기)
 #    - tsconfig.json (덮어쓰기)
+#    - vite.config.ts (새로 추가 — server SSR 빌드 → dist/server/index.cjs)
 #    - vitest.config.ts (새로 추가)
-#    - src/ 전체 (wizard 생성 src/ 위에 덮어쓰기)
-#    - docs/ 전체 (새로 추가)
+#    - eslint.config.js · .prettierrc.json · .prettierignore · .nvmrc · .env.example (새로 추가)
+#    - src/ 전체 (wizard 생성 src/ 위에 덮어쓰기; wizard의 src/client/는 지우지 말 것)
+#    - scripts/ · test/ · fixtures/ · docs/ 전체 (새로 추가)
+#    ※ wizard가 만든 vite.config 가 따로 있으면 vibe-mod 것으로 교체 (server-only 빌드)
 
-# 3) deps 설치 + 타입체크
-npm install
-npx tsc --noEmit
+# 3) deps 설치 + 빌드/타입체크 — Step 1.5 참조
+npm install && npm run build && npm run doctor
 ```
 
 **또는** (대안 — 더 안전):
 
 - 이 디렉토리(`~/Documents/GitHub/vibe-mod/`) 자체를 wizard의 `--directory` 옵션으로 지정해서 wizard가 빈 폴더에서 시작하는 대신 우리 산출물 위에서 working하도록.
 
-### Step 2. OpenAI 키 발급 + 권한 확인
+### Step 1.5. 빌드/타입 확인 (overlay 후)
+
+```bash
+npm install            # devvit + vite 포함, git hooks 설치
+npm run typecheck      # tsc --noEmit — clean이어야
+npm run build          # tsc --noEmit && vite build → dist/server/index.cjs (CJS 번들, ~2.1MB)
+npm run doctor         # 0 hard issues (login/.devvit-app-id 경고는 정상)
+# 주의: vibe-mod의 devvit.json은 이제 server/scripts 블록을 갖춘 self-contained 상태.
+#       wizard의 src/client/(있다면)는 지우지 말 것 — vibe-mod는 client 없는 server-only.
+```
+
+### Step 2. OpenAI 키 발급 + 권한 확인 (로컬 검증)
 
 ```bash
 # 1) https://platform.openai.com/api-keys 에서 새 키 생성
-# 2) 일일 spending limit 설정 ($5 권장 for hackathon)
-# 3) gpt-5.4-mini 모델 권한 + 계정 billing 활성 확인 (npm run openai:smoketest 로 검증)
-# 4) Devvit secret으로 저장:
-npx devvit settings set openaiApiKey
-# 프롬프트에서 sk-… 키 붙여넣기
+# 2) 계정 billing 활성화 (platform.openai.com/account/billing — 안 하면 429 billing_not_active)
+# 3) .env 에 OPENAI_API_KEY=sk-... (cp .env.example .env), 그 다음:
+npm run openai:smoketest    # 7/7 나와야 정상 (gpt-5.4-mini/-nano/5.4 비교: OPENAI_MODELS=...)
 ```
 
-### Step 3. Day 1 EXIT GATE 검증
+### Step 3. devvit upload/playtest → 그 다음에 secret 저장
 
 ```bash
-npm run dev
-# → playtest sub 자동 생성됨
-# → 해당 sub에 mod 권한으로 들어가서
-# → 우측 ⋯ 메뉴에서 "vibe-mod: Compose rule" 보이는지 확인
-# → 클릭 → 폼 열리는지 확인 (description에 "Compiles used today: 0 / 50")
+npm run dev            # = devvit playtest — playtest sub에 첫 설치 (또는 devvit upload)
+# ⚠️ devvit settings set 은 "최소 1개 설치" 후에만 가능 → npm run dev 를 *먼저*:
+npx devvit settings set openaiApiKey   # 프롬프트에 sk-… 붙여넣기 (배포용 키; 로컬 .env와 별개)
+npx devvit settings list               # 저장 확인
+# EXIT GATE: playtest sub에서 mod 권한으로 → 우측 ⋯ → "vibe-mod: Compose rule" 보임 → 폼 열림
+#            ("Compiles used today: 0 / 50")
 ```
 
 **Gate 통과 시 Day 2 진행. 미통과 시:**
@@ -122,7 +134,8 @@ npm run dev
 ├── devvit.json          ← Devvit 설정 (permissions, settings, menu, forms, triggers, scheduler)
 ├── package.json         ← deps: @devvit/web@^0.12.22, hono@^4.12.18, zod@^4.4.3
 ├── tsconfig.json        ← strict + ES2024 + bundler resolution
-├── vitest.config.ts     ← coverage thresholds (95%/95%/90% for security paths)
+├── vitest.config.ts     ← test runner (coverage thresholds)
+├── vite.config.ts        ← server SSR build → dist/server/index.cjs (CJS; devvit.json scripts run this)
 ├── src/
 │   ├── shared/
 │   │   ├── rule-schema.ts       (160줄, Zod v4 strict)
@@ -152,8 +165,12 @@ npm run dev
 └── docs/
     ├── README-vibe-mod.md       ← 2-door split + Fetch Domains 섹션
     ├── new-mod-checklist.md     ← 다음 Devvit 모드 시작 시 복사할 인프라 목록 + SDK gotcha 목록
+    ├── devvit-reference.md      ← developers.reddit.com/docs 비-게임 58페이지 스냅샷 (Playwright 크롤, 2026-05-12)
+    ├── devvit-conformance-notes.md ← vibe-mod ↔ Devvit Web 문서 정합 감사 (수정·확인·미해결)
     ├── tos.md                   ← Terms of Service
     └── privacy.md               ← Privacy Policy
+
+deps: @devvit/web · hono · zod  (devvit·vite·vitest·eslint·prettier·tsx 등은 devDep)
 
 src/**/*.test.ts — 152 tests (vitest), 13 files (1 skipped = replay-runner):
   rule-schema · evaluator · executor · fact-bag · system-prompt · starter-rules
@@ -197,14 +214,25 @@ git hooks (simple-git-hooks): pre-commit → lint-staged ;  pre-push → typeche
 - ✅ **OpenAI 검증 결과: 통과.** 계정 billing 활성·모델 존재·`json_object` 준수·schema-valid 룰 생산·clarification 경로 모두 OK. compile당 ~1.3k in + ~0.1k out ≈ $0.0001 (사용자는 무료 데일리 티어라 사실상 0).
 - 데이터 공유: 무료 티어 = OpenAI "API I/O 공유" 프로그램. vibe-mod는 무해 — 모드 자연어 + 시스템 프롬프트만 보냄, Reddit 콘텐츠 안 보냄 (hard-lock #6). 공유되는 건 룰 텍스트 + 컴파일된 JSON.
 
+**세션 5 (2026-05-12) — Devvit Web 공식 문서 정독 + 정합화 (PR `feat/devvit-web-conformance`)**:
+
+- 📚 `developers.reddit.com`은 WebFetch 차단 → **Playwright로 비-게임 문서 58페이지 크롤** → `docs/devvit-reference.md`(440KB 스냅샷)에 저장. 발견사항/수정내역은 `docs/devvit-conformance-notes.md`.
+- ✅ **`devvit build`가 실패했을 버그 수정**: `devvit.json`에 필수 `server` 블록 없음 + CJS 서버 번들 빌드 없음(`tsconfig`는 `noEmit`+ESM). → `vite.config.ts`(SSR 빌드, `format:'cjs'` → `dist/server/index.cjs`, `noExternal:true`, minify) + `devvit.json`에 `"server":{"entry":"dist/server/index.cjs"}` + `"scripts":{"dev":"vite build --watch","build":"vite build"}` + `"dev":{"subreddit":"vibe-mod-playtest"}` 추가. `vite` devDep 추가. `npm run build` = `tsc --noEmit && vite build`. `dist/`는 gitignore.
+- ✅ **deps 정리**: Devvit Web은 `@devvit/web` 하나 + submodule import만 사용 → `@devvit/reddit`/`@devvit/redis`를 `dependencies`에서 제거(transitive로 남음), `import {redis} from '@devvit/redis'` → `'@devvit/web/server'`. `TaskBody/TaskAck` 로컬 타입 → 진짜 `TaskRequest/TaskResponse`(`@devvit/web/server` 재익스포트). CLI devDep: `@devvit/cli` → `devvit`.
+- ✅ **`context` 사용**: 서브레딧 이름은 `reddit.getCurrentSubreddit()`(API 호출) 대신 `context.subredditName`/`subredditId`(요청 컨텍스트, 호출 0). `devvit-helpers.ts`가 `context.*` 기반·동기. 호출부 `await`/`.catch` 제거. (테스트에 `fakeContext` 더블 추가.)
+- ✅ **publish 순서 정정**: `devvit settings set`은 "최소 1개 설치" 후에만 → `npm run dev`/`devvit upload`를 *먼저*. (이전 HANDOFF Step 2가 순서 틀림 — 위 Step 1.5/2/3에서 정정.)
+- ✅ 정합 확인(변경 없음): `/internal/` 엔드포인트 prefix, `permissions.reddit.scope:"moderator"`(mod 액션은 앱 계정으로 — `asUser` 불필요), `permissions.http.domains` (OpenAI+Gemini만 허용 AI provider), `settings` 스키마(공식 "complete example"이 문자 그대로 `openaiApiKey` 사용), form/menu/toast 응답 shape, 트리거 핸들러 shape, recursive-trigger 없음, `reddit.report/remove/lock/setPostFlair/banUser/...` API 모두 맞음. (상세: `docs/devvit-conformance-notes.md`.)
+- 152 tests pass (1 skipped). tsc/lint/format clean. acceptance 4/4. `vite build` → `dist/server/index.cjs`(~2.1MB) `require()` 가능 확인.
+
 **아직 남음 (= 사용자 Devvit wizard 단계 + 이후)**:
 
-- `npm run dev` 실기 playtest로만 검증되는 gate (Compose 메뉴 렌더, **Devvit 안에서** OpenAI compile 라운드트립, undo 라운드트립) — OpenAI 자체는 standalone으로 검증됨. acceptance/doctor 출력의 MANUAL/soft 섹션 참조
-- `.devvit-app-id` (wizard 생성) + `devvit build`로 SDK 정합화 최종 확인 (타입은 통과하나 실제 런타임 동작은 playtest 필요)
+- `npm run dev` 실기 playtest로만 검증되는 gate (Compose 메뉴 렌더, **Devvit 안에서** OpenAI compile 라운드트립, undo 라운드트립) — OpenAI 자체는 standalone으로 검증됨. acceptance/doctor/conformance-notes 참조
+- `.devvit-app-id` (wizard 생성) + `devvit build`로 SDK 정합화 **런타임** 최종 확인 (타입·빌드는 통과, 실제 Devvit 동작은 playtest 필요)
 - **`/internal/scheduler/dry-run-replay`는 v0.1에서 스텁(no-op)** — "dry-run preview" 헤드라인 기능의 실제 구현 필요 (rules:draft 읽어서 최근 N개 post에 evaluate → 시뮬레이션 audit 작성). Day 3 작업.
+- **`marketingAssets.icon`** — App Directory 리스팅용 1024×1024 PNG 필요 (publish 전).
 - ToS + Privacy HTML로 export 후 갤러리 repo에 push (Devpost 제출 폼 URL용)
 - (선택) `Two-Weeks-Team/devvit-mod-template` — `docs/new-mod-checklist.md`의 인프라를 `gh repo create --template`용으로 분리. 인프라 파일은 vibe-mod에서 복사 가능하므로 급하진 않음.
-- (제품 관점, 해커톤 후) **fact 레이어 확장** — 현 closed `FactPaths`(~21개)로는 표현 못 하는 흔한 룰이 많음 (repost 감지, cross-sub 도배, 편집 여부, 계정 유사도, 언어 감지 등). 이게 AutoMod 대비 capability ceiling이 낮은 근본 원인. 평가 보고서 참조.
+- (제품 관점, 해커톤 후) **fact 레이어 확장** — 현 closed `FactPaths`(~22개)로는 표현 못 하는 흔한 룰이 많음 (repost 감지, cross-sub 도배, 편집 여부, 계정 유사도, 언어 감지 등). 이게 AutoMod 대비 capability ceiling이 낮은 근본 원인. 평가 보고서 참조.
 
 ---
 

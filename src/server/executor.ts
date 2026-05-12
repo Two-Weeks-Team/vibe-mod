@@ -2,8 +2,7 @@
 // Action execution with audit + rollback. Atomic via Redis multi/exec.
 // HARD-CODED action whitelist. LLM cannot smuggle new verbs through.
 
-import { reddit, settings } from '@devvit/web/server';
-import { redis } from '@devvit/redis';
+import { reddit, redis, settings } from '@devvit/web/server';
 import { GUARDED_ACTIONS, type ActionType, type RuleType } from '../shared/rule-schema';
 import { asT1, asT3, getCurrentSubredditName } from './devvit-helpers';
 
@@ -35,7 +34,7 @@ export interface ExecutionContext {
 
 export async function executeActions(ctx: ExecutionContext): Promise<AuditEntry[]> {
   const audits: AuditEntry[] = [];
-  const subName = await getCurrentSubredditName().catch(() => 'unknown');
+  const subName = getCurrentSubredditName();
   const dryRunOnly = (await settings.get('dryRunOnly')) as boolean;
   const effectiveShadow = ctx.isShadowMode || ctx.isDryRun || dryRunOnly;
 
@@ -119,7 +118,7 @@ async function applyAction(act: ActionType, ctx: ExecutionContext): Promise<Reco
       const prevFlair = post.flair?.text ?? null;
       // Devvit's correct flair-set API (audit FIND-09 fix).
       // setPostFlair is on the reddit client; takes { subredditName, postId, text, cssClass }.
-      const subredditName = await getCurrentSubredditName();
+      const subredditName = getCurrentSubredditName();
       await reddit.setPostFlair({
         subredditName,
         postId: asT3(ctx.thingId),
@@ -149,7 +148,7 @@ async function applyAction(act: ActionType, ctx: ExecutionContext): Promise<Reco
       // GUARDED — only reached if mod explicitly allowed
       await reddit.banUser({
         username: ctx.authorName,
-        subredditName: await getCurrentSubredditName(),
+        subredditName: getCurrentSubredditName(),
         reason: act.params.reason,
         duration: act.params.duration,
       });
@@ -158,7 +157,7 @@ async function applyAction(act: ActionType, ctx: ExecutionContext): Promise<Reco
     case 'mute': {
       await reddit.muteUser({
         username: ctx.authorName,
-        subredditName: await getCurrentSubredditName(),
+        subredditName: getCurrentSubredditName(),
         note: act.params.note,
       });
       return { action: 'mute', duration: act.params.duration };
@@ -166,7 +165,7 @@ async function applyAction(act: ActionType, ctx: ExecutionContext): Promise<Reco
     case 'permaban': {
       await reddit.banUser({
         username: ctx.authorName,
-        subredditName: await getCurrentSubredditName(),
+        subredditName: getCurrentSubredditName(),
         reason: act.params.reason,
       });
       return { action: 'permaban' };
@@ -198,7 +197,7 @@ export async function rollbackAction(
           : await reddit.getCommentById(asT1(entry.thingId));
       await target.unlock();
     } else if (entry.action === 'ban' || entry.action === 'permaban') {
-      await reddit.unbanUser(entry.authorName, await getCurrentSubredditName());
+      await reddit.unbanUser(entry.authorName, getCurrentSubredditName());
     } else {
       return { ok: false, reason: `Action "${entry.action}" is not reversible` };
     }

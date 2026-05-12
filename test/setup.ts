@@ -12,12 +12,13 @@ import {
   makeFakeReddit,
   makeFakeSettings,
   makeFakeScheduler,
+  makeFakeContext,
   installFakeFetch,
   assertWebCrypto,
 } from './devvit-testkit';
 
 export { fakeListing, openaiResponse, openaiError } from './devvit-testkit';
-export type { FakeRedis, FakeTxn, FakeReddit } from './devvit-testkit';
+export type { FakeRedis, FakeTxn, FakeReddit, FakeContext } from './devvit-testkit';
 
 assertWebCrypto();
 
@@ -26,13 +27,16 @@ export const fakeRedis = makeFakeRedis();
 export const fakeReddit = makeFakeReddit('testsub');
 export const fakeSettings = makeFakeSettings();
 export const fakeScheduler = makeFakeScheduler();
+export const fakeContext = makeFakeContext('testsub');
 export const fakeFetch = installFakeFetch();
 
-vi.mock('@devvit/redis', () => ({ redis: fakeRedis }));
+// vibe-mod imports `reddit`/`redis`/`settings`/`scheduler`/`context` all from `@devvit/web/server`.
 vi.mock('@devvit/web/server', () => ({
   reddit: fakeReddit,
+  redis: fakeRedis,
   settings: fakeSettings,
   scheduler: fakeScheduler,
+  context: fakeContext,
 }));
 
 // Reset all doubles between tests so state never leaks across cases.
@@ -60,4 +64,5 @@ beforeEach(() => {
   fakeScheduler.runJob.mockResolvedValue('job_1');
   fakeSettings.get.mockResolvedValue(undefined);
   fakeFetch.mockReset();
+  Object.assign(fakeContext, makeFakeContext('testsub'));
 });
