@@ -73,6 +73,43 @@ describe('POST /internal/menu/dashboard', () => {
     expect(body.showForm.form.description).toContain('remove (shadow)');
     expect(body.showForm.form.acceptLabel).toBe('Activate 5 draft rule(s)');
   });
+
+  it('shows the dry-run preview for draft rules that have a stored result', async () => {
+    asMod();
+    await fakeRedis.set('testsub:rules:draft', JSON.stringify(seedStarterRules(7)));
+    await fakeRedis.set(
+      'testsub:dryrun:r_new_account_fast_post',
+      JSON.stringify({
+        ruleId: 'r_new_account_fast_post',
+        ruleSourceNL: '…',
+        ranAt: Date.now(),
+        status: 'ok',
+        sampledPosts: 10,
+        matched: [{ thingId: 't3_x', thingType: 'post', authorName: 'newbie', would: ['modqueue'] }],
+      }),
+    );
+    await fakeRedis.set(
+      'testsub:dryrun:r_wall_of_caps_comment',
+      JSON.stringify({
+        ruleId: 'r_wall_of_caps_comment',
+        ruleSourceNL: '…',
+        ranAt: Date.now(),
+        status: 'unavailable',
+        note: 'comment events; shadow mode it',
+        sampledPosts: 0,
+        matched: [],
+      }),
+    );
+
+    const body = await (
+      await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
+    ).json();
+    expect(body.showForm.form.description).toContain('Dry-run preview (draft rules):');
+    expect(body.showForm.form.description).toContain(
+      'r_new_account_fast_post: would match 1/10 recent post(s) → modqueue',
+    );
+    expect(body.showForm.form.description).toContain('r_wall_of_caps_comment: comment events; shadow mode it');
+  });
 });
 
 describe('POST /internal/form/dashboard-action', () => {
