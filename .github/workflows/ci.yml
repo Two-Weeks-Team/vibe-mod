@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: typecheck · test · acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Note: `npm ci` currently trips EBADPLATFORM on esbuild's per-platform
+      # optional deps with the committed lockfile; `npm install` honours the
+      # lockfile when it's in sync and skips non-matching optional packages.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck (tsc --noEmit, strict)
+        run: npx tsc --noEmit
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Acceptance gates (G1–G4)
+        run: npm run acceptance
