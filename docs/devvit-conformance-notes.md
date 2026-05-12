@@ -46,3 +46,24 @@ crawled with Playwright (the site is SSG, so `fetch()` from the browser context
 returns the rendered article HTML). 58 non-game pages were captured and rendered
 to `docs/devvit-reference.md`. API-reference (typedoc) class pages were spot-checked
 against `node_modules/@devvit/*/*.d.ts`, which are authoritative for exact signatures.
+
+## Test harness — official `@devvit/test` adopted (alongside the hand-rolled one)
+
+The docs (`/docs/guides/tools/devvit_test`) ship an official harness, `@devvit/test`'s
+`createDevvitTest()` — a miniature Devvit backend per test (real-ish Redis with
+`watch/multi/exec` transactions, Scheduler, Settings, context; built-in isolation,
+no `beforeEach`; the Reddit API is only *partially* mocked, so Reddit calls still need spies).
+
+vibe-mod now uses it for `*.devvit.test.ts` files (`vitest.devvit.config.ts`,
+`npm run test:devvit`, run in CI) — see `src/server/executor.devvit.test.ts`
+(executor audit/rollback round-trip + per-author rate limit through the real Redis).
+
+The bulk of the suite (route call-tests, etc.) still uses the hand-rolled
+`test/devvit-testkit.ts` harness — it's high-fidelity (in-memory Redis with the
+`watch/multi/exec` shape, per-test reset), all tests pass, and migrating ~13 files
+to `createDevvitTest()` is a large refactor with limited functional gain (and would
+need a parallel vitest project anyway, since the global `vi.mock('@devvit/web/server')`
+in `test/setup.ts` conflicts with `@devvit/test`'s app-fencing). **The recommended
+path: start new mods on `@devvit/test` from day one** (see `docs/new-mod-checklist.md`),
+and migrate vibe-mod's existing tests in a dedicated PR if/when it's worth it — not
+under hackathon time pressure.

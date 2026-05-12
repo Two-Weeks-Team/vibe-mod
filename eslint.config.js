@@ -42,6 +42,15 @@ export default tseslint.config(
     },
   },
   {
+    // `*.devvit.test.ts` use `createDevvitTest()`'s returned `test()` (not the
+    // vitest global), which the plugin can't recognise as a test block.
+    files: ['**/*.devvit.test.ts'],
+    rules: {
+      'vitest/no-standalone-expect': 'off',
+      'vitest/expect-expect': 'off',
+    },
+  },
+  {
     // Dev scripts run under tsx; allow process/console freely.
     files: ['scripts/**/*.ts'],
     rules: {},
