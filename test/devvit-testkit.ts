@@ -140,6 +140,9 @@ export function makeFakeReddit(subName = 'testsub', subId = `t5_${subName}` as `
       async () => ({ fromComments: 0, fromPosts: 0 }) as { fromComments?: number; fromPosts?: number },
     ),
     getModerators: vi.fn(async (_opts: { subredditName: string }) => fakeListing([] as Array<{ username: string }>)),
+    getNewPosts: vi.fn((_opts: { subredditName?: string; limit?: number }) =>
+      fakeListing([] as Array<Record<string, unknown>>),
+    ),
     getPostById: vi.fn(),
     getCommentById: vi.fn(),
     report: vi.fn(async () => ({}) as unknown),

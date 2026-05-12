@@ -55,6 +55,7 @@ beforeEach(() => {
   fakeReddit.getUserByUsername.mockResolvedValue(null);
   fakeReddit.getUserKarmaFromCurrentSubreddit.mockResolvedValue({ fromComments: 0, fromPosts: 0 });
   fakeReddit.getModerators.mockResolvedValue({ all: async () => [] });
+  fakeReddit.getNewPosts.mockReturnValue({ all: async () => [] });
   fakeReddit.report.mockResolvedValue({});
   fakeReddit.setPostFlair.mockResolvedValue(undefined);
   fakeReddit.banUser.mockResolvedValue(undefined);
