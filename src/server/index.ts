@@ -1216,12 +1216,23 @@ async function callOpenAI(
 
   let apiKey = subKey.trim();
   let settingsRpcDown = false;
+  let globalKeyLength = 0;
   if (!apiKey) {
     // No BYOK → required to read the global key. This one IS fatal if
     // unreachable, but distinguish "plugin RPC unavailable" from "no key
     // configured" so the caller can present an honest toast.
     try {
       const globalKey = ((await settings.get('openaiApiKey')) as string) ?? '';
+      // Diagnostic per docs Q2 — typeof + length is safe to log; the *value*
+      // is never logged. Tells us whether the secret is set, whether it
+      // returned a string (vs undefined for a missing schema field), and
+      // its length (which we can eyeball-compare to a typical OpenAI key
+      // length). NEVER log the value itself.
+      globalKeyLength = globalKey.length;
+      console.log('[vibe-mod] callOpenAI: settings.get(openaiApiKey) ok:', {
+        defined: typeof globalKey,
+        len: globalKey.length,
+      });
       apiKey = globalKey.trim();
     } catch (err) {
       settingsRpcDown = true;
@@ -1229,18 +1240,18 @@ async function callOpenAI(
     }
   }
 
-  // Local-only env fallback (gated, opt-in). When
-  //   VIBE_MOD_LOCAL_OPENAI_FALLBACK=1
-  // is set in the build environment AND no key was reachable via Devvit
-  // settings, fall back to \`process.env.OPENAI_API_KEY\`. Devvit Reddit
-  // runtime never sets either var, so production is unchanged. Document in
-  // .env.example as "local playtest only, not deployed runtime".
-  if (!apiKey && process.env.VIBE_MOD_LOCAL_OPENAI_FALLBACK === '1') {
+  // Official-docs-sanctioned local fallback. Per Devvit docs
+  // (capabilities/server/settings-and-secrets.mdx): "Local environment
+  // variables and .env files are read during playtesting only." Reddit
+  // production runtime does NOT set process.env.OPENAI_API_KEY, so the
+  // fallback is a no-op there. In local \`devvit playtest\` it picks up the
+  // .env value, which lets the compose flow work without round-tripping
+  // through Devvit's plugin RPC. No env-var gate needed — production
+  // can't accidentally activate this path.
+  if (!apiKey) {
     const envKey = (process.env.OPENAI_API_KEY ?? '').trim();
     if (envKey) {
-      console.warn(
-        '[vibe-mod] callOpenAI: using VIBE_MOD_LOCAL_OPENAI_FALLBACK=1 → process.env.OPENAI_API_KEY (local playtest only).',
-      );
+      console.warn('[vibe-mod] callOpenAI: settings.get returned no key — falling back to .env (playtest only).');
       apiKey = envKey;
     }
   }
@@ -1251,6 +1262,7 @@ async function callOpenAI(
     if (settingsRpcDown) throw new Error('no_key_plugin_rpc');
     throw new Error('no_key');
   }
+  void globalKeyLength; // referenced for type-narrowing; we already logged it above
 
   let model = 'gpt-5.4-mini';
   try {
@@ -1276,25 +1288,38 @@ async function callOpenAI(
     messages.push({ role: 'user', content: `Clarification: ${clarif}` });
   }
 
+  // Build the body, then escape every non-ASCII character as a JSON \uXXXX
+  // sequence. OpenAI returned HTTP 400 "We could not parse the JSON body of
+  // your request" against the obvious `JSON.stringify(...)` form when the
+  // payload contained system-prompt em-dashes / arrows (≈ / — / →) — likely
+  // a Devvit HTTP-plugin UTF-8 corner case on the wire. The escape form is
+  // 7-bit ASCII, still strictly valid JSON, and any compliant parser
+  // (including OpenAI's) decodes it back to the same Unicode characters.
+  const rawBody = JSON.stringify({
+    model, // gpt-5.4-mini (default) / gpt-5.4-nano / gpt-5.4 — see devvit.json openaiModel
+    response_format: { type: 'json_object' },
+    messages,
+    // Tuned for what this call is: a mechanical NL → strict-JSON translation.
+    //   reasoning_effort: 'none'  — no hidden reasoning needed; keeps it fast and stops the
+    //                               token budget being eaten by reasoning (gpt-5.4 family value;
+    //                               older models call this 'minimal'). Measured ~1.1-1.4s.
+    //   verbosity: 'low'          — terse JSON, no commentary.
+    //   max_completion_tokens     — a compiled rule + a clarification fit well under 600.
+    //   (no `temperature` — the gpt-5.x family only accepts the default; max_tokens isn't
+    //    supported on these models, use max_completion_tokens.)
+    reasoning_effort: 'none',
+    verbosity: 'low',
+    max_completion_tokens: 600,
+  });
+  // ASCII-safe rewrite: any non-ASCII char (>= 0x80) → `\uXXXX` literal in
+  // the JSON. Still valid JSON (parsers decode \u back), but transports the
+  // body as pure 7-bit ASCII bytes, sidestepping the UTF-8-on-the-wire bug.
+  const asciiSafeBody = rawBody.replace(/[-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model, // gpt-5.4-mini (default) / gpt-5.4-nano / gpt-5.4 — see devvit.json openaiModel
-      response_format: { type: 'json_object' },
-      messages,
-      // Tuned for what this call is: a mechanical NL → strict-JSON translation.
-      //   reasoning_effort: 'none'  — no hidden reasoning needed; keeps it fast and stops the
-      //                               token budget being eaten by reasoning (gpt-5.4 family value;
-      //                               older models call this 'minimal'). Measured ~1.1–1.4s.
-      //   verbosity: 'low'          — terse JSON, no commentary.
-      //   max_completion_tokens     — a compiled rule + a clarification fit well under 600.
-      //   (no `temperature` — the gpt-5.x family only accepts the default; max_tokens isn't
-      //    supported on these models, use max_completion_tokens.)
-      reasoning_effort: 'none',
-      verbosity: 'low',
-      max_completion_tokens: 600,
-    }),
+    body: asciiSafeBody,
   });
 
   if (!resp.ok) {
