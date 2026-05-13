@@ -53,6 +53,30 @@ describe('buildPostFactBag', () => {
     expect(bag['sub.over18']).toBe(true);
   });
 
+  it('computes wordCount, nonAsciiRatio, imageCount, and isLinkPost (v0.2 facts)', async () => {
+    // text post with two image links + one non-image link
+    const bag = await buildPostFactBag({
+      ...POST,
+      url: 'https://www.reddit.com/r/sub/comments/p1/x', // self-post permalink, not an image
+      body: 'look https://i.redd.it/abc.jpg and https://example.com/pic.png plus https://example.com/page',
+    });
+    expect(bag['content.wordCount']).toBe(6); // look <url> and <url> plus <url>
+    expect(bag['content.imageCount']).toBe(2); // i.redd.it/*.jpg + example.com/*.png
+    expect(bag['content.isLinkPost']).toBe(false); // has a selftext body
+    expect(bag['content.nonAsciiRatio']).toBe(0); // pure ASCII
+
+    // link/image submission: empty body, post url is an image
+    const link = await buildPostFactBag({ ...POST, body: '', url: 'https://i.redd.it/zzz.png' });
+    expect(link['content.isLinkPost']).toBe(true);
+    expect(link['content.imageCount']).toBe(1); // the post's own image link
+    expect(link['content.wordCount']).toBe(0);
+
+    // non-ASCII body
+    const intl = await buildPostFactBag({ ...POST, body: '안녕하세요 모두', url: undefined });
+    expect(intl['content.nonAsciiRatio']).toBeGreaterThan(0.7);
+    expect(intl['content.isLinkPost']).toBe(false);
+  });
+
   it('uses safe zero/false defaults for missing optional inputs', async () => {
     const bag = await buildPostFactBag({ id: 't3_x', authorId: 't2_x', authorName: 'bob' });
     expect(bag['content.length']).toBe(0);
@@ -90,6 +114,20 @@ describe('buildCommentFactBag', () => {
     expect(bag['content.title.contains']).toBe('');
     expect(bag['content.url']).toBe('');
     expect(bag['content.containsRegex']).toBe('nice POST friend');
+    expect(bag['content.isLinkPost']).toBe(false); // never applies to comments
+  });
+
+  it('computes wordCount / imageCount / nonAsciiRatio for comment bodies', async () => {
+    const bag = await buildCommentFactBag({
+      id: 't1_c2',
+      body: 'see https://i.imgur.com/x.png 좋아요',
+      parentId: 't3_p1',
+      authorId: 't2_a1',
+      authorName: 'alice',
+    });
+    expect(bag['content.wordCount']).toBe(3); // "see", url, "좋아요"
+    expect(bag['content.imageCount']).toBe(1); // i.imgur.com/x.png
+    expect(bag['content.nonAsciiRatio']).toBeGreaterThan(0);
   });
 });
 
