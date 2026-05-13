@@ -91,6 +91,7 @@ describe('Rule schema — properties', () => {
               'enabled',
               'shadow',
               'createdAt',
+              'activatedAt',
               'createdBy',
               // `__proto__` set via an object literal does not become an own
               // enumerable property, and Zod additionally strips it as a

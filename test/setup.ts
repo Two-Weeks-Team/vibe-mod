@@ -52,8 +52,16 @@ beforeEach(() => {
   fakeReddit.getCommentById.mockReset();
   fakeReddit.getCurrentSubreddit.mockResolvedValue({ id: 't5_testsub', name: 'testsub' });
   fakeReddit.getCurrentUser.mockResolvedValue({ id: 't2_caller', username: 'caller' });
-  fakeReddit.getUserByUsername.mockResolvedValue(null);
-  fakeReddit.getUserKarmaFromCurrentSubreddit.mockResolvedValue({ fromComments: 0, fromPosts: 0 });
+  // Default author = an ordinary, well-established account (1 yr old, 5k karma).
+  // Tests that need a brand-new / low-karma author override this. (A `null` here
+  // pushes fact-bag onto its fail-SAFE "looks established" defaults — exercise
+  // that explicitly in the fact-bag tests, not implicitly everywhere.)
+  fakeReddit.getUserByUsername.mockResolvedValue({
+    createdAt: new Date(Date.now() - 365 * 24 * 3_600_000),
+    linkKarma: 2000,
+    commentKarma: 3000,
+  });
+  fakeReddit.getUserKarmaFromCurrentSubreddit.mockResolvedValue({ fromComments: 100, fromPosts: 100 });
   fakeReddit.getModerators.mockResolvedValue({ all: async () => [] });
   fakeReddit.getNewPosts.mockReturnValue({ all: async () => [] });
   fakeReddit.report.mockResolvedValue({});

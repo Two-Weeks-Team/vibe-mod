@@ -18,14 +18,16 @@ const call = (path: string, body: unknown) =>
     }),
   );
 
-/** A live (shadow:false) active bundle with one rule matching low-karma authors → modqueue. */
+/** A live (shadow:false) active bundle with one rule matching short content → modqueue.
+ *  Keyed on `content.length` (not author karma) so it matches the test events
+ *  regardless of the default author profile. */
 function activeLowKarmaModqueueBundle() {
   const r: RuleType = Rule.parse({
-    id: 'r_low_karma_modqueue',
-    name: 'low karma → mod queue',
-    sourceNL: 'send low-karma posts to the mod queue',
+    id: 'r_short_content_modqueue',
+    name: 'short content → mod queue',
+    sourceNL: 'send very short posts/comments to the mod queue',
     on: ['onPostSubmit', 'onCommentSubmit'],
-    when: { fact: 'author.totalKarma', op: 'lt', value: 50 },
+    when: { fact: 'content.length', op: 'lt', value: 50 },
     then: [{ action: 'modqueue', params: { note: 'low-karma' } }],
     createdAt: 0,
     createdBy: 't2_seed',
@@ -86,12 +88,17 @@ describe('POST /internal/trigger/on-post-submit', () => {
     expect(fakeReddit.report).toHaveBeenCalledTimes(1);
   });
 
-  it('does not act when dryRunOnly is set — only writes a shadow audit', async () => {
+  it('does not act when dryRunOnly is set — only writes a shadow audit row', async () => {
     await fakeRedis.set('testsub:rules:active', JSON.stringify(activeLowKarmaModqueueBundle()));
     fakeSettings.get.mockImplementation(async (k: string) => (k === 'dryRunOnly' ? true : undefined));
 
     await call('/internal/trigger/on-post-submit', POST_EVENT);
     expect(fakeReddit.report).not.toHaveBeenCalled();
+    const ids = await fakeRedis.zRange('testsub:audit', 0, -1);
+    expect(ids).toHaveLength(1);
+    expect((await fakeRedis.hGetAll(`testsub:audit:${ids[0].member}`)).outcome).toBe('shadow');
+    // shadow → no rollback token (nothing to undo)
+    expect(await fakeRedis.get(`testsub:rollback:${ids[0].member}`)).toBeUndefined();
   });
 
   it('does not act when the matching rule is still in shadow mode', async () => {
@@ -100,6 +107,23 @@ describe('POST /internal/trigger/on-post-submit', () => {
     await fakeRedis.set('testsub:rules:active', JSON.stringify(shadowBundle));
 
     await call('/internal/trigger/on-post-submit', POST_EVENT);
+    expect(fakeReddit.report).not.toHaveBeenCalled();
+    const ids = await fakeRedis.zRange('testsub:audit', 0, -1);
+    expect(ids).toHaveLength(1);
+    expect((await fakeRedis.hGetAll(`testsub:audit:${ids[0].member}`)).outcome).toBe('shadow');
+  });
+
+  it('is a safe no-op when the persisted active bundle is malformed JSON (never 500s the trigger)', async () => {
+    await fakeRedis.set('testsub:rules:active', '{ not valid json at all');
+    const res = await call('/internal/trigger/on-post-submit', POST_EVENT);
+    expect(await res.json()).toEqual({ status: 'ok' });
+    expect(fakeReddit.report).not.toHaveBeenCalled();
+  });
+
+  it('is a safe no-op when the persisted active bundle fails schema validation', async () => {
+    await fakeRedis.set('testsub:rules:active', JSON.stringify({ schemaVersion: '1.0.0', rules: [{ bogus: true }] }));
+    const res = await call('/internal/trigger/on-post-submit', POST_EVENT);
+    expect(await res.json()).toEqual({ status: 'ok' });
     expect(fakeReddit.report).not.toHaveBeenCalled();
   });
 });
