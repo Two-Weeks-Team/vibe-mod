@@ -254,10 +254,11 @@ app.post('/internal/menu/compose-rule', async (c) => {
         fields: [
           {
             name: 'rule',
-            label: 'Describe your rule in plain English',
+            label: 'Describe your rule in plain English (max 1000 characters)',
             type: 'paragraph',
             defaultValue: '',
-            helpText: 'Example: "If a brand-new account posts within 3 hours of joining, send to mod queue."',
+            helpText:
+              'Example: "If a brand-new account posts within 3 hours of joining, send to mod queue." Up to 1000 chars; shorter compiles more reliably.',
           },
           {
             name: 'allowGuarded',
@@ -287,6 +288,28 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
 
   if (!rule?.trim()) {
     return c.json<UiResponse>({ showToast: { text: 'Please type a rule.', appearance: 'neutral' } });
+  }
+
+  // Length cap — must match callOpenAI's slice(0, 1000) / slice(0, 500), and
+  // give the user an explicit error instead of silently truncating their
+  // sentence into a different rule. Audit gap-analysis SEC-03.
+  const MAX_RULE_CHARS = 1000;
+  const MAX_CLARIFICATION_CHARS = 500;
+  if (rule.length > MAX_RULE_CHARS) {
+    return c.json<UiResponse>({
+      showToast: {
+        text: `Rule is too long (${rule.length} / ${MAX_RULE_CHARS} characters). Trim it down and try again — shorter rules also compile more reliably.`,
+        appearance: 'neutral',
+      },
+    });
+  }
+  if (clarificationAnswer && clarificationAnswer.length > MAX_CLARIFICATION_CHARS) {
+    return c.json<UiResponse>({
+      showToast: {
+        text: `Clarification answer is too long (${clarificationAnswer.length} / ${MAX_CLARIFICATION_CHARS} characters). Try a shorter answer.`,
+        appearance: 'neutral',
+      },
+    });
   }
 
   const subredditName = getCurrentSubredditName();
