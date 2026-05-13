@@ -948,7 +948,13 @@ async function nodeToHonoListener(req: IncomingMessage, res: ServerResponse): Pr
   }
 }
 
-if (typeof createServer === 'function' && typeof getServerPort === 'function') {
+// The Devvit runtime is the only environment that supplies WEBBIT_PORT — see
+// `@devvit/shared-types/server/get-server-port.js`. CI's "Server bundle loads
+// as CommonJS" smoke (a plain `node -e "require(...)"`) and any unit test that
+// requires the production bundle directly must NOT bind a real port; otherwise
+// the process never exits. Gate listen() on WEBBIT_PORT so the side-effect
+// fires only inside the sandbox.
+if (typeof createServer === 'function' && typeof getServerPort === 'function' && process.env.WEBBIT_PORT) {
   try {
     const server = createServer(nodeToHonoListener);
     server.on('error', (err: Error) => console.error('[vibe-mod] server error:', err));
