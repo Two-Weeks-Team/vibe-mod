@@ -67,9 +67,12 @@ export const FactPaths = [
 export type FactPath = (typeof FactPaths)[number];
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Predicate operators — closed set
+// Predicate operators — closed set. Exported so evaluator.ts and the
+// property-based tests can share the same source of truth (previously the
+// evaluator hard-coded its own list of supported ops which could drift).
 // ──────────────────────────────────────────────────────────────────────────────
-const PredicateOps = ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'contains', 'matches'] as const;
+export const PredicateOps = ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'contains', 'matches'] as const;
+export type PredicateOp = (typeof PredicateOps)[number];
 
 const LeafPredicate = z.object({
   fact: z.enum(FactPaths),
@@ -147,9 +150,14 @@ const Action = z.discriminatedUnion('action', [
 ]);
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Triggers the rule listens to (subset of Devvit triggers vibe-mod handles)
+// Triggers the rule listens to (subset of Devvit triggers vibe-mod handles).
+// Exported so callers (evaluator.ts, index.ts trigger handlers, the dry-run
+// preview, system-prompt.ts) can import the literal-typed union instead of
+// hard-coding 'onPostSubmit' | ... in their own signatures.
 // ──────────────────────────────────────────────────────────────────────────────
-const RuleTrigger = z.enum(['onPostSubmit', 'onCommentSubmit', 'onPostReport', 'onCommentReport']);
+export const RULE_TRIGGERS = ['onPostSubmit', 'onCommentSubmit', 'onPostReport', 'onCommentReport'] as const;
+export type RuleTriggerName = (typeof RULE_TRIGGERS)[number];
+const RuleTrigger = z.enum(RULE_TRIGGERS);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Single rule
