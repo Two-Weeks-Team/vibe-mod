@@ -127,14 +127,17 @@ async function isCallerModerator(): Promise<boolean> {
   // Try the Redis cache first
   const cacheKey = keys.modlist(subredditName);
   let mods: string[] | null = null;
+  let redisOk = true;
   try {
     const cached = await redis.get(cacheKey);
     if (cached) mods = JSON.parse(cached);
     console.log(`[vibe-mod] mod check: redis cache ${mods ? 'hit' : 'miss'}`);
   } catch (err) {
+    redisOk = false;
     console.warn('[vibe-mod] mod check: redis.get(modlist) threw:', describeErr(err));
   }
 
+  let redditOk = true;
   if (!mods) {
     try {
       const list = await reddit.getModerators({ subredditName });
@@ -147,9 +150,26 @@ async function isCallerModerator(): Promise<boolean> {
         console.warn('[vibe-mod] mod check: cache write failed (non-fatal):', describeErr(err));
       }
     } catch (err) {
+      redditOk = false;
       console.warn('[vibe-mod] mod check: getModerators threw:', describeErr(err));
-      return false;
     }
+  }
+
+  // Resilient fallback (reddit/devvit#258 work-around): if BOTH redis.get AND
+  // reddit.getModerators throw, we can't enumerate the mod list ourselves — but
+  // Devvit's gateway already filtered this request by `forUserType:"moderator"`
+  // (see devvit.json menu.items). The gateway is the security boundary; trust
+  // it as fallback so menus open even while the plugin RPC sidecar is broken.
+  // Logged loudly so the fallback is auditable. Removed once #258 is fixed.
+  if (!mods) {
+    if (!redisOk && !redditOk) {
+      console.warn(
+        `[vibe-mod] mod check: plugin RPC unreachable for both redis and reddit — falling back to gateway-side forUserType:"moderator" filter; trusting ${username}`,
+      );
+      return true;
+    }
+    console.warn('[vibe-mod] mod check: could not resolve mod list — refusing');
+    return false;
   }
 
   const isMod = mods.includes(username);
@@ -211,14 +231,24 @@ app.post('/internal/menu/compose-rule', async (c) => {
   }
 
   const subredditName = getCurrentSubredditName();
-  const dailyCount = Number((await redis.get(keys.compileCount(subredditName, todayKey()))) ?? '0');
+  // Best-effort daily-count read — render "—" if plugin RPC is unreachable
+  // (reddit/devvit#258) so the form still opens. Quota enforcement still
+  // happens server-side in compose-rule-submit, where we fail-closed if we
+  // can't confirm the count.
+  let dailyCountDisplay = '—';
+  try {
+    const raw = await redis.get(keys.compileCount(subredditName, todayKey()));
+    dailyCountDisplay = String(Number(raw ?? '0'));
+  } catch (err) {
+    console.warn('[vibe-mod] compose-rule: redis.get(dailyCount) threw — showing "—":', describeErr(err));
+  }
 
   return c.json<UiResponse>({
     showForm: {
       name: 'ruleComposerForm',
       form: {
         title: `Compose rule for r/${subredditName}`,
-        description: `Compiles used today: ${dailyCount} / ${LIMITS.COMPILE_RATE_LIMIT_PER_DAY}.\nYour rule will be saved as a draft. Dry-run preview runs automatically.`,
+        description: `Compiles used today: ${dailyCountDisplay} / ${LIMITS.COMPILE_RATE_LIMIT_PER_DAY}.\nYour rule will be saved as a draft. Dry-run preview runs automatically.`,
         acceptLabel: 'Compile + Preview',
         cancelLabel: 'Cancel',
         fields: [
@@ -261,12 +291,28 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
 
   const subredditName = getCurrentSubredditName();
 
-  // Rate limit (sub-scoped)
+  // Rate limit (sub-scoped). All plugin RPC here is wrapped in try/catch
+  // because reddit/devvit#258 makes every Devvit plugin call throw
+  // "Error: undefined undefined: undefined". An unwrapped throw at this
+  // layer 500s the whole handler — the user sees nothing happen when they
+  // click "Compile + Preview". Fail-open on the quota check (skip enforcement
+  // if we can't read the counter), fail-closed on the key check (require
+  // explicit BYOK absence to fall through). See claudedocs/2026-05-13-...
   const todayCounterKey = keys.compileCount(subredditName, todayKey());
-  const todayCount = Number((await redis.get(todayCounterKey)) ?? '0');
+  let todayCount = 0;
+  try {
+    todayCount = Number((await redis.get(todayCounterKey)) ?? '0');
+  } catch (err) {
+    console.warn('[vibe-mod] submit: redis.get(todayCount) threw — skipping quota:', describeErr(err));
+  }
 
   // Check if BYOK key is present (skip quota for BYOK)
-  const subOverrideKey = (await settings.get('subredditOpenaiApiKey')) as string;
+  let subOverrideKey = '';
+  try {
+    subOverrideKey = ((await settings.get('subredditOpenaiApiKey')) as string) ?? '';
+  } catch (err) {
+    console.warn('[vibe-mod] submit: settings.get(subredditOpenaiApiKey) threw — assuming no BYOK:', describeErr(err));
+  }
   const usingBYOK = !!subOverrideKey?.trim();
 
   if (!usingBYOK && todayCount >= LIMITS.COMPILE_RATE_LIMIT_PER_DAY) {
@@ -286,14 +332,15 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     compiled = result.json;
     tokensIn = result.tokensIn;
     tokensOut = result.tokensOut;
-  } catch {
-    // Don't leak the error message — it could echo back compile context to the user.
-    return c.json<UiResponse>({
-      showToast: {
-        text: 'Compiler offline. Your draft is saved. Try again in a minute.',
-        appearance: 'neutral',
-      },
-    });
+  } catch (err) {
+    // Don't leak the error message — it could echo back compile context.
+    // Distinguish "no key" (settings.get fails or key missing) from network/API errors.
+    const msg = String((err as Error)?.message ?? err);
+    const userMsg = msg.includes('no_key')
+      ? 'Compiler offline (plugin RPC unreachable — see reddit/devvit#258). The compose flow needs settings.get(openaiApiKey) to work, which is currently blocked by an OPEN Devvit platform bug.'
+      : 'Compiler offline. Try again in a minute.';
+    console.warn('[vibe-mod] submit: callOpenAI threw:', describeErr(err));
+    return c.json<UiResponse>({ showToast: { text: userMsg, appearance: 'neutral' } });
   }
 
   // Clarification path — sends user back to form with answer field, NOT concatenation.
@@ -367,14 +414,31 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     });
   }
 
-  // Append to draft bundle (sub-scoped key)
+  // Append to draft bundle (sub-scoped key). All plugin RPC here is
+  // best-effort — see top of handler for the reddit/devvit#258 rationale.
+  // We've already produced a valid compiled `validated` rule above; even if
+  // persistence fails the user still sees the compile-success toast and the
+  // rule object below.
   const draftKey = keys.rulesDraft(subredditName);
-  const draftJson = await redis.get(draftKey);
+  let draftJson: string | undefined;
+  try {
+    draftJson = (await redis.get(draftKey)) ?? undefined;
+  } catch (err) {
+    console.warn('[vibe-mod] submit: redis.get(draft) threw — starting fresh:', describeErr(err));
+  }
+
+  let llmModel = 'gpt-5.4-mini';
+  try {
+    llmModel = ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini';
+  } catch (err) {
+    console.warn('[vibe-mod] submit: settings.get(openaiModel) threw — using default:', describeErr(err));
+  }
+
   const draft: RuleBundleType = safeParseBundle(draftJson, 'compose/draft') ?? {
     schemaVersion: '1.0.0',
     bundleVersion: 0,
     compiledAt: Date.now(),
-    llmModel: ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini',
+    llmModel,
     llmTokensIn: 0,
     llmTokensOut: 0,
     rules: [],
@@ -395,25 +459,52 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
   draft.llmTokensIn += tokensIn;
   draft.llmTokensOut += tokensOut;
 
-  await redis.set(draftKey, JSON.stringify(draft));
-
-  // Increment daily compile counter (sub-scoped, BYOK skipped)
-  if (!usingBYOK) {
-    await redis.set(todayCounterKey, String(todayCount + 1));
-    await redis.expire(todayCounterKey, 86_400);
+  let persisted = true;
+  try {
+    await redis.set(draftKey, JSON.stringify(draft));
+  } catch (err) {
+    persisted = false;
+    console.warn('[vibe-mod] submit: redis.set(draft) threw — rule NOT persisted:', describeErr(err));
   }
 
-  // Kick off dry-run replay job
-  await scheduler.runJob({
-    name: 'dry-run-replay',
-    runAt: new Date(),
-    data: { ruleId: validated.id, subredditName },
-  });
+  // Increment daily compile counter (sub-scoped, BYOK skipped) — best-effort.
+  if (!usingBYOK) {
+    try {
+      await redis.set(todayCounterKey, String(todayCount + 1));
+      await redis.expire(todayCounterKey, 86_400);
+    } catch (err) {
+      console.warn('[vibe-mod] submit: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
+    }
+  }
 
+  // Kick off dry-run replay job — best-effort. If scheduler is unreachable
+  // the rule is still compiled; the user just doesn't get the dry-run preview.
+  let dryRunQueued = true;
+  try {
+    await scheduler.runJob({
+      name: 'dry-run-replay',
+      runAt: new Date(),
+      data: { ruleId: validated.id, subredditName },
+    });
+  } catch (err) {
+    dryRunQueued = false;
+    console.warn('[vibe-mod] submit: scheduler.runJob(dry-run) threw — no preview:', describeErr(err));
+  }
+
+  // Honest user-facing toast — say what actually happened rather than promising
+  // a dashboard view that won't render if persistence failed.
+  const lines = [`Compiled rule "${validated.name}".`];
+  if (persisted && dryRunQueued) {
+    lines.push('Dry-run started — check Dashboard in 30s.');
+  } else if (persisted) {
+    lines.push('Saved as draft (dry-run preview unavailable).');
+  } else {
+    lines.push('Plugin RPC unreachable — rule compiled but not persisted (reddit/devvit#258).');
+  }
   return c.json<UiResponse>({
     showToast: {
-      text: `Compiled rule "${validated.name}". Dry-run started — check Dashboard in 30s.`,
-      appearance: 'success',
+      text: lines.join(' '),
+      appearance: persisted ? 'success' : 'neutral',
     },
   });
 });
@@ -428,34 +519,61 @@ app.post('/internal/menu/dashboard', async (c) => {
   }
 
   const subredditName = getCurrentSubredditName();
-  const active = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'dashboard/active');
-  const draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'dashboard/draft');
+  // All redis reads here are best-effort (reddit/devvit#258). If plugin RPC
+  // is unreachable, the dashboard still opens with a banner explaining the
+  // bug instead of 500-ing into a "click does nothing" experience.
+  let rpcOk = true;
+  let active: RuleBundleType | null = null;
+  let draft: RuleBundleType | null = null;
+  try {
+    active = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'dashboard/active');
+    draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'dashboard/draft');
+  } catch (err) {
+    rpcOk = false;
+    console.warn('[vibe-mod] dashboard: redis.get(rules) threw:', describeErr(err));
+  }
 
-  const auditKey = keys.audit(subredditName);
-  const recentIds = await redis.zRange(auditKey, 0, 19, { by: 'rank', reverse: true });
   const recent: Array<Record<string, string>> = [];
-  for (const m of recentIds) {
-    const h = await redis.hGetAll(keys.auditEntry(subredditName, m.member));
-    recent.push({ ...h, id: String(m.member) });
+  try {
+    const auditKey = keys.audit(subredditName);
+    const recentIds = await redis.zRange(auditKey, 0, 19, { by: 'rank', reverse: true });
+    for (const m of recentIds) {
+      const h = await redis.hGetAll(keys.auditEntry(subredditName, m.member));
+      recent.push({ ...h, id: String(m.member) });
+    }
+  } catch (err) {
+    rpcOk = false;
+    console.warn('[vibe-mod] dashboard: redis.zRange(audit) threw:', describeErr(err));
   }
 
   // Dry-run results for the draft rules (written by /internal/scheduler/dry-run-replay).
   const dryRunLines: string[] = [];
   for (const r of draft?.rules ?? []) {
-    const raw = await redis.get(keys.dryrun(subredditName, r.id));
-    if (!raw) continue;
-    const d = JSON.parse(raw) as DryRunResult;
-    if (d.status === 'ok') {
-      dryRunLines.push(
-        `  ${r.id}: would match ${d.matched.length}/${d.sampledPosts} recent post(s)` +
-          (d.matched.length ? ` → ${[...new Set(d.matched.flatMap((m) => m.would))].join(', ')}` : ''),
-      );
-    } else {
-      dryRunLines.push(`  ${r.id}: ${d.note ?? 'dry-run unavailable'}`);
+    try {
+      const raw = await redis.get(keys.dryrun(subredditName, r.id));
+      if (!raw) continue;
+      const d = JSON.parse(raw) as DryRunResult;
+      if (d.status === 'ok') {
+        dryRunLines.push(
+          `  ${r.id}: would match ${d.matched.length}/${d.sampledPosts} recent post(s)` +
+            (d.matched.length ? ` → ${[...new Set(d.matched.flatMap((m) => m.would))].join(', ')}` : ''),
+        );
+      } else {
+        dryRunLines.push(`  ${r.id}: ${d.note ?? 'dry-run unavailable'}`);
+      }
+    } catch (err) {
+      console.warn(`[vibe-mod] dashboard: redis.get(dryrun/${r.id}) threw:`, describeErr(err));
     }
   }
 
   const summary = [
+    ...(rpcOk
+      ? []
+      : [
+          '⚠ Plugin RPC unreachable (reddit/devvit#258 — OPEN platform bug).',
+          'Persistence is offline; this view reflects what redis would return.',
+          '',
+        ]),
     `Active rules: ${active?.rules.length ?? 0}`,
     `Draft rules: ${draft?.rules.length ?? 0}`,
     `Recent actions: ${recent.length}`,
