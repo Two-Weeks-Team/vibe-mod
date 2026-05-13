@@ -18,7 +18,6 @@ import type {
   OnCommentSubmitRequest,
   OnPostReportRequest,
   OnCommentReportRequest,
-  OnAppInstallRequest,
   OnAppUpgradeRequest,
   TriggerResponse,
   SettingsValidationRequest,
@@ -568,20 +567,14 @@ app.post('/internal/trigger/on-comment-submit', async (c) => {
   return c.json<TriggerResponse>({ status: 'ok' });
 });
 
-app.post('/internal/trigger/on-app-install', async (c) => {
-  // Trigger handlers are bound by Devvit's RPC deadline — if our handler throws
-  // OR runs slow on a cold start, the install is rolled back with an opaque
-  // "context canceled" error and no logs (the install never completes, so log
-  // capture never starts). Defend in two layers:
-  //   1) try/catch + always-200 — never let an exception kill the install.
-  //   2) defer the seed work to a one-shot scheduler job — the install handler
-  //      returns immediately, the seeding runs out-of-band and is non-fatal.
-  await c.req.json<OnAppInstallRequest>().catch(() => null);
-  try {
-    await scheduler.runJob({ name: 'seed-on-install', runAt: new Date() });
-  } catch (err) {
-    console.error('[vibe-mod] failed to schedule seed-on-install (non-fatal):', err);
-  }
+app.post('/internal/trigger/on-app-install', (c) => {
+  // Minimal handler — return 200 immediately, no body parse, no scheduler call,
+  // no I/O at all. Previous versions (even with seeding deferred) still failed
+  // with "context canceled" on install — likely a cold-start vs trigger-deadline
+  // race on the first request to a 2 MB CJS bundle. Seeding moved to the FIRST
+  // trigger after install: on the first onPostSubmit/onCommentSubmit, if no
+  // active bundle exists, we seed in-band (cold-start has happened by then,
+  // and that handler is allowed to take longer than the install hook).
   return c.json<TriggerResponse>({ status: 'ok' });
 });
 
