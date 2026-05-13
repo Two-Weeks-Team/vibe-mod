@@ -280,13 +280,16 @@ async function writeAudit(subName: string, entry: AuditEntry): Promise<void> {
   await txn.exec();
 }
 
-// Applied actions additionally get a rollback token (auto-expires at 30d).
+// Applied actions additionally get a rollback token (auto-expires at 30d — set
+// atomically via the `expiration` option so a failed EXPIRE can't leave the
+// token TTL-less, like acquireOnce above).
 async function writeAuditAndRollback(
   subName: string,
   entry: AuditEntry,
   reverseParams: Record<string, unknown>,
 ): Promise<void> {
   await writeAudit(subName, entry);
-  await redis.set(`${subName}:rollback:${entry.actionId}`, JSON.stringify({ entry, reverseParams }));
-  await redis.expire(`${subName}:rollback:${entry.actionId}`, ROLLBACK_TTL_SECONDS);
+  await redis.set(`${subName}:rollback:${entry.actionId}`, JSON.stringify({ entry, reverseParams }), {
+    expiration: new Date(Date.now() + ROLLBACK_TTL_SECONDS * 1000),
+  });
 }
