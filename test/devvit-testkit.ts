@@ -181,6 +181,7 @@ export function makeFakeContext(subName = 'testsub', subId = `t5_${subName}` as 
     postId: undefined as `t3_${string}` | undefined,
     commentId: undefined as `t1_${string}` | undefined,
     userId: 't2_caller' as `t2_${string}` | undefined,
+    username: 'caller' as string | undefined, // experimental BaseContext field — vibe-mod reads it for mod-check
     appName: 'vibe-mod',
     metadata: {} as Record<string, unknown>,
   };

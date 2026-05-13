@@ -11,6 +11,7 @@
 //   - Clarification loop sends separate user turn, no string concat (FIND-11)
 
 import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
 import type {
   MenuItemRequest,
   UiResponse,
@@ -33,7 +34,6 @@ import {
   type TaskRequest,
   type TaskResponse,
 } from '@devvit/web/server';
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import { RuleBundle, Rule, checkTreeDepth, type RuleBundleType, type RuleType } from '../shared/rule-schema';
 import { seedStarterRules } from '../shared/starter-rules';
 import { VIBE_MOD_SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from '../shared/system-prompt';
@@ -42,9 +42,65 @@ import { keys } from '../shared/redis-keys';
 import { buildPostFactBag, buildCommentFactBag } from './fact-bag';
 import { selectMatchingRules } from './evaluator';
 import { executeActions, rollbackAction, acquireOnce } from './executor';
-import { getCurrentSubredditName, getCurrentSubredditRef } from './devvit-helpers';
+import {
+  getCurrentSubredditName,
+  getCurrentSubredditRef,
+  getCurrentUsername,
+  getCurrentUserId,
+} from './devvit-helpers';
 
 const app = new Hono();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Diagnostics — production errors stringify as "Error: undefined undefined:
+// undefined" because the underlying Devvit/Twirp error envelope has
+// undefined fields. console.warn(..., err) collapses to that single opaque
+// line. `describeErr` pulls the real shape (name/code/message/stack/keys/ctor)
+// so we can see what actually failed.
+// Two background agents (metadata-flow trace + stock-template diff) both
+// concluded the bug is in the plugin RPC layer (RedisClient.js:584-590,
+// getDevvitConfig().use(...)), not in our Hono adapter. ALS works end-to-end
+// (context.username reads cleanly). Either globalThis.devvit.config is
+// missing, or the host-side gRPC sidecar is rejecting the call.
+// ─────────────────────────────────────────────────────────────────────────────
+function describeErr(err: unknown): Record<string, unknown> {
+  if (err == null) return { value: err };
+  if (typeof err !== 'object') return { type: typeof err, value: String(err) };
+  const e = err as Record<string, unknown> & { constructor?: { name?: string }; stack?: string };
+  const keys = Object.getOwnPropertyNames(err as object);
+  return {
+    name: (e as { name?: unknown }).name,
+    code: (e as { code?: unknown }).code,
+    message: (e as { message?: unknown }).message,
+    detail: (e as { detail?: unknown }).detail,
+    cause: (e as { cause?: unknown }).cause,
+    stack: typeof e.stack === 'string' ? e.stack.split('\n').slice(0, 6).join('\n') : undefined,
+    ctor: e.constructor?.name,
+    keys,
+  };
+}
+
+function snapshotDevvitRuntime(): Record<string, unknown> {
+  const g = globalThis as { devvit?: { config?: unknown; metadataProvider?: () => unknown } };
+  const hasConfig = !!g.devvit?.config;
+  const hasMetaProvider = typeof g.devvit?.metadataProvider === 'function';
+  let metaSample: unknown;
+  let metaKeyCount: number | undefined;
+  try {
+    if (hasMetaProvider) {
+      const m = g.devvit!.metadataProvider!();
+      if (m && typeof m === 'object') {
+        const ks = Object.keys(m as object);
+        metaKeyCount = ks.length;
+        // Pick only safe, short fields to avoid spilling tokens.
+        metaSample = ks.slice(0, 6);
+      }
+    }
+  } catch (err) {
+    metaSample = `metadataProvider() threw: ${describeErr(err)['message'] ?? 'unknown'}`;
+  }
+  return { hasConfig, hasMetaProvider, metaKeyCount, metaSample };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared: moderator authorization guard (audit FIND-03 fix)
@@ -52,28 +108,53 @@ const app = new Hono();
 // Every form/menu handler MUST call this and bail on false.
 // ─────────────────────────────────────────────────────────────────────────────
 async function isCallerModerator(): Promise<boolean> {
-  try {
-    const user = await reddit.getCurrentUser();
-    if (!user) return false;
-    const subredditName = getCurrentSubredditName();
-    if (!subredditName) return false;
+  // Diagnostic snapshot — proves whether plugin config + ALS metadata are
+  // present at request time. (Remove once §B-4 root cause is confirmed.)
+  const runtime = snapshotDevvitRuntime();
+  const subredditName = getCurrentSubredditName();
+  const username = getCurrentUsername();
+  console.log('[vibe-mod] mod-check enter:', { sub: subredditName, user: username, runtime });
 
-    const cacheKey = keys.modlist(subredditName);
-    const cached = await redis.get(cacheKey);
-    let mods: string[];
-    if (cached) {
-      mods = JSON.parse(cached);
-    } else {
-      const list = await reddit.getModerators({ subredditName });
-      mods = (await list.all()).map((m) => m.username);
-      await redis.set(cacheKey, JSON.stringify(mods));
-      await redis.expire(cacheKey, LIMITS.MOD_LIST_CACHE_SECONDS);
-    }
-    return mods.includes(user.username);
-  } catch (err) {
-    console.warn('[vibe-mod] mod check failed:', err);
+  if (!subredditName || subredditName === 'unknown') {
+    console.warn('[vibe-mod] mod check: no subreddit in context — refusing');
     return false;
   }
+  if (!username) {
+    console.warn('[vibe-mod] mod check: no username in context — refusing');
+    return false;
+  }
+
+  // Try the Redis cache first
+  const cacheKey = keys.modlist(subredditName);
+  let mods: string[] | null = null;
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) mods = JSON.parse(cached);
+    console.log(`[vibe-mod] mod check: redis cache ${mods ? 'hit' : 'miss'}`);
+  } catch (err) {
+    console.warn('[vibe-mod] mod check: redis.get(modlist) threw:', describeErr(err));
+  }
+
+  if (!mods) {
+    try {
+      const list = await reddit.getModerators({ subredditName });
+      mods = (await list.all()).map((m) => m.username);
+      console.log(`[vibe-mod] mod check: getModerators → ${mods.length} mods: ${mods.join(',')}`);
+      try {
+        await redis.set(cacheKey, JSON.stringify(mods));
+        await redis.expire(cacheKey, LIMITS.MOD_LIST_CACHE_SECONDS);
+      } catch (err) {
+        console.warn('[vibe-mod] mod check: cache write failed (non-fatal):', describeErr(err));
+      }
+    } catch (err) {
+      console.warn('[vibe-mod] mod check: getModerators threw:', describeErr(err));
+      return false;
+    }
+  }
+
+  const isMod = mods.includes(username);
+  console.log(`[vibe-mod] mod check: ${username} ∈ mods? ${isMod}`);
+  return isMod;
 }
 
 // SECURITY: only call this from server-controlled paths — never echo to user.
@@ -256,7 +337,7 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     const augmented = {
       ...(compiled as object),
       createdAt: Date.now(),
-      createdBy: (await reddit.getCurrentUser())?.id ?? 't2_unknown',
+      createdBy: getCurrentUserId() ?? 't2_unknown',
       enabled: true,
       shadow: true,
     };
@@ -766,8 +847,19 @@ app.post('/internal/scheduler/shadow-promote-check', async (c) => {
 
 app.post('/internal/scheduler/rate-limit-circuit-breaker', async (c) => {
   await c.req.json<TaskRequest>();
+  const runtime = snapshotDevvitRuntime();
+  console.log('[vibe-mod] scheduler/rate-limit enter:', { runtime });
   const { id: subredditId, name: subredditName } = getCurrentSubredditRef();
-  const maxPerHour = ((await settings.get('maxActionsPerHour')) as number) ?? 100;
+  let maxPerHour = 100;
+  try {
+    const v = (await settings.get('maxActionsPerHour')) as number | undefined;
+    if (typeof v === 'number') maxPerHour = v;
+    console.log('[vibe-mod] scheduler/rate-limit: settings.get OK, maxPerHour=', maxPerHour);
+  } catch (err) {
+    console.warn('[vibe-mod] scheduler/rate-limit: settings.get threw:', describeErr(err));
+    // Don't 500 the scheduler — log and proceed with default. Otherwise Devvit
+    // retries and the same error spams the logs every 5 min.
+  }
   const oneHourAgo = Date.now() - 3_600_000;
 
   // FIND-04 fix: count audit entries in the last-hour SCORE window, not all-time.
@@ -891,71 +983,36 @@ function isClarification(obj: unknown): obj is { needsClarification: true; quest
 export default app;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Devvit Web server bootstrap
+// Devvit Web server bootstrap — official template pattern.
 //
-// Devvit's gateway POSTs to our endpoints; if we don't start an HTTP server
-// here, every request comes back as "fetch failed" / nothing renders. The
-// official pattern (devvit docs: "Cache helper" example) is:
-//   const server = createServer(app); server.listen(getServerPort());
+// Source: github.com/reddit/devvit-template-react/blob/main/src/server/index.ts
+// (Reddit's canonical Devvit Web template).
 //
-// But Hono's `app` is an object (not a Node-style requestListener), so we have
-// to adapt Node's IncomingMessage → Web `Request` and pipe `app.fetch()`'s
-// Response back. We MUST go through Devvit's `createServer` (not @hono/node-server
-// directly) — Devvit's wrapper installs the per-request `runWithContext` that
-// makes `context.subredditName` etc. work inside our handlers.
+//   serve({ fetch: app.fetch, createServer, port: getServerPort() })
 //
-// Guarded by typeof check so the unit tests that vi.mock('@devvit/web/server')
-// don't try to bind a port.
+// `@hono/node-server`'s `serve` builds a proper Node IncomingMessage → Web
+// `Request` adapter (lazy body streams, correct host handling, idempotent
+// close hooks). Crucially it accepts a `createServer` option, so the entire
+// adapter pipeline still runs inside Devvit's `createServer` wrapper — which
+// installs the per-request `runWithContext(Context(req.headers), …)` that
+// downstream plugin RPC reads `context.metadata` from.
+//
+// Our prior hand-rolled `nodeToHonoListener` adapter (PR #26) was correct at
+// the body-shuttling level but diverged from the canonical pattern, and
+// hand-rolled adapters can subtly break async_hooks propagation on edge
+// cases. The official adapter is the safer ground truth.
+//
+// Gate on WEBBIT_PORT so module-load smoke (CI `node -e "require(...)"`)
+// doesn't bind a port and hang forever — the Devvit runtime is the only
+// environment that supplies WEBBIT_PORT.
 // ─────────────────────────────────────────────────────────────────────────────
-async function readRequestBody(req: IncomingMessage): Promise<Buffer | undefined> {
-  if (req.method === 'GET' || req.method === 'HEAD') return undefined;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer));
-  }
-  return chunks.length ? Buffer.concat(chunks) : undefined;
-}
-
-async function nodeToHonoListener(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  try {
-    const url = `http://localhost${req.url ?? '/'}`;
-    const headers = new Headers();
-    for (const [k, v] of Object.entries(req.headers)) {
-      if (typeof v === 'string') headers.set(k, v);
-      else if (Array.isArray(v)) headers.set(k, v.join(','));
-    }
-    const body = await readRequestBody(req);
-    // Devvit POSTs JSON bodies to our endpoints, so a UTF-8 string is fine.
-    // (Avoids a TS friction around Buffer↔BodyInit; sufficient for everything
-    // vibe-mod handles.)
-    const webBody = body ? body.toString('utf8') : undefined;
-    const webReq = new Request(url, { method: req.method ?? 'GET', headers, body: webBody });
-    const webRes = await app.fetch(webReq);
-    res.statusCode = webRes.status;
-    webRes.headers.forEach((value, name) => res.setHeader(name, value));
-    const text = webRes.body ? await webRes.text() : '';
-    res.end(text);
-  } catch (err) {
-    console.error('[vibe-mod] request adapter error:', err);
-    if (!res.headersSent) {
-      res.statusCode = 500;
-      res.setHeader('content-type', 'application/json');
-    }
-    res.end(JSON.stringify({ status: 'error', message: 'internal adapter error' }));
-  }
-}
-
-// The Devvit runtime is the only environment that supplies WEBBIT_PORT — see
-// `@devvit/shared-types/server/get-server-port.js`. CI's "Server bundle loads
-// as CommonJS" smoke (a plain `node -e "require(...)"`) and any unit test that
-// requires the production bundle directly must NOT bind a real port; otherwise
-// the process never exits. Gate listen() on WEBBIT_PORT so the side-effect
-// fires only inside the sandbox.
 if (typeof createServer === 'function' && typeof getServerPort === 'function' && process.env.WEBBIT_PORT) {
   try {
-    const server = createServer(nodeToHonoListener);
-    server.on('error', (err: Error) => console.error('[vibe-mod] server error:', err));
-    server.listen(getServerPort());
+    serve({
+      fetch: app.fetch,
+      createServer,
+      port: getServerPort(),
+    });
   } catch (err) {
     // In tests, `vi.mock('@devvit/web/server', ...)` may stub these out → silently skip.
     console.warn('[vibe-mod] server bootstrap skipped (test or non-Devvit runtime):', err);

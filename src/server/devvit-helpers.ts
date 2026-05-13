@@ -27,3 +27,21 @@ export function getCurrentSubredditName(): string {
 export function getCurrentSubredditRef(): { id: T5; name: string } {
   return { id: (context.subredditId || 't5_unknown') as T5, name: context.subredditName || 'unknown' };
 }
+
+/** The username of the user who triggered this request (menu click, form
+ *  submit, trigger event …), read directly from the request context.
+ *
+ *  NB: `reddit.getCurrentUser()` throws "Error: undefined undefined: undefined"
+ *  under `permissions.reddit.scope: "moderator"` — that API call needs a
+ *  different scope. Reading the context header is the only path that works.
+ *  The field is marked @experimental in @devvit/public-api but is populated
+ *  by Devvit's gateway for every user-triggered request. */
+export function getCurrentUsername(): string | undefined {
+  return (context as { username?: string }).username || undefined;
+}
+
+/** The t2_ id of the user who triggered this request, or undefined for
+ *  scheduler/cron contexts. Same rationale as `getCurrentUsername`. */
+export function getCurrentUserId(): string | undefined {
+  return context.userId || undefined;
+}
