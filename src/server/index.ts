@@ -1293,27 +1293,33 @@ async function callOpenAI(
   // model still learns the rule-compilation pattern. Length caps preserved
   // (rule ≤ 1000, clarification ≤ 500) for prompt-injection surface control.
   const clarif = clarificationAnswer?.trim().slice(0, 500);
-  // Flatten to a single line of ASCII without `\n` so the wire body has zero
-  // newline-escape sequences. PR #34 dropped reasoning_effort + verbosity but
-  // production v0.0.35 still hit 400; the only remaining variable separating
-  // our body from probe(f) (the 6 KB single-user 200 OK shape) is escape-char
-  // density (`\n` and `\"`). Collapsing whitespace eliminates the `\n` family
-  // entirely. The few-shot OUTPUT examples still produce `\"` from the outer
-  // JSON.stringify wrapping our content string -- if 400 persists after this,
-  // we'll need to express few-shot output without quoted keys.
+  // Round-5 strategy: ship a minimal-shape body that exactly matches probe(f)
+  // (the only production-verified 200-OK shape at ~6 KB):
+  //   - single user message
+  //   - no `\n` in content (use ' ' between sections)
+  //   - few-shot truncated to 1 example so total body fits well under 5610 B
+  //     (probe(f)'s exact size). PR #32-#35 all kept 4 examples; 400 persisted.
+  //   - {model, messages, max_completion_tokens, response_format} only
+  // Plus: send the body as a Uint8Array rather than a string, so Devvit's
+  // HTTP plugin transports raw bytes without re-encoding the JSON wrapper.
   const collapse = (s: string) => s.replace(/\s+/g, ' ').trim();
-  const exampleLine = (ex: (typeof FEW_SHOT_EXAMPLES)[number], i: number) =>
-    `EXAMPLE ${i + 1} INPUT: ${collapse(ex.user)} OUTPUT: ${JSON.stringify(ex.assistant)}`;
+  const SHORT_PROMPT_CHARS = 3500; // hard cap on system prompt; rest of body stays small
+  const systemShort = collapse(VIBE_MOD_SYSTEM_PROMPT).slice(0, SHORT_PROMPT_CHARS);
+  const firstExample = FEW_SHOT_EXAMPLES[0];
+  const exampleText = firstExample
+    ? `EXAMPLE INPUT: ${collapse(firstExample.user)} EXAMPLE OUTPUT: ${JSON.stringify(firstExample.assistant)}`
+    : '';
   const compositeContent = [
     'SYSTEM INSTRUCTIONS:',
-    collapse(VIBE_MOD_SYSTEM_PROMPT),
-    'EXAMPLES:',
-    ...FEW_SHOT_EXAMPLES.map(exampleLine),
+    systemShort,
+    exampleText,
     'TASK INPUT:',
     collapse(userRule.slice(0, 1000)),
     ...(clarif ? ['TASK CLARIFICATION:', collapse(clarif)] : []),
     'OUTPUT (strict JSON only, no prose):',
-  ].join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'user', content: compositeContent },
   ];
@@ -1345,10 +1351,23 @@ async function callOpenAI(
   // body as pure 7-bit ASCII bytes, sidestepping the UTF-8-on-the-wire bug.
   const asciiSafeBody = rawBody.replace(/[-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
 
+  // Round 5: send body as Uint8Array with explicit Content-Length. String
+  // bodies travel through Devvit's HTTP plugin as a JS string that the plugin
+  // re-encodes to UTF-8 before the wire write; PR #32-#35 history shows
+  // large stringified-JSON bodies corrupt somewhere in that re-encode path.
+  // Uint8Array skips it: bytes are already final, plugin just streams them.
+  // Body is already pure ASCII so TextEncoder().encode produces exactly
+  // asciiSafeBody.length bytes (one byte per char).
+  const bodyBytes = new TextEncoder().encode(asciiSafeBody);
+  console.log('[vibe-mod] callOpenAI: body bytes =', bodyBytes.byteLength);
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: asciiSafeBody,
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': String(bodyBytes.byteLength),
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: bodyBytes,
   });
 
   if (!resp.ok) {
