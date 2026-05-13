@@ -1264,12 +1264,22 @@ async function callOpenAI(
   }
   void globalKeyLength; // referenced for type-narrowing; we already logged it above
 
-  let model = 'gpt-5.4-mini';
+  // Hardcoded model temporarily: every probe(b)(d)(e)(f) that returned HTTP
+  // 200 in production used `gpt-5.4-nano`. callOpenAI defaults to
+  // `gpt-5.4-mini`, which probes never tested in production. PR #32-#37
+  // shipped many body shapes; all still HTTP 400 ("could not parse JSON").
+  // Pinning to the probe-verified model isolates whether the model itself
+  // is what differs between probe-success and callOpenAI-failure.
+  const model = 'gpt-5.4-nano';
+  let settingsModel: string | null = null;
   try {
-    model = ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini';
+    settingsModel = ((await settings.get('openaiModel')) as string) || null;
+    console.log('[vibe-mod] callOpenAI: settings.get(openaiModel) =', JSON.stringify(settingsModel));
   } catch (err) {
-    console.warn('[vibe-mod] callOpenAI: settings.get(openaiModel) threw — using default:', describeErr(err));
+    console.warn('[vibe-mod] callOpenAI: settings.get(openaiModel) threw — using nano default:', describeErr(err));
   }
+  void settingsModel;
+  console.log('[vibe-mod] callOpenAI: model resolved =', model);
 
   // Single user message containing system instructions, few-shot examples, and
   // the user rule (+ optional clarification), all inline.
