@@ -132,19 +132,25 @@ describe('buildCommentFactBag', () => {
 });
 
 describe('author facts', () => {
-  it('returns safe defaults when getUserByUsername throws', async () => {
+  // On a Reddit-API failure the author looks long-established / high-karma, so
+  // restrictive "new account" / "low karma" rules fail SAFE (don't fire on a
+  // flood of legit posts) — see SAFE_AUTHOR_DEFAULTS in fact-bag.ts.
+  const ESTABLISHED = 1_000_000;
+  it('returns fail-safe (looks-established) defaults when getUserByUsername throws', async () => {
     fakeReddit.getUserByUsername.mockRejectedValue(new Error('reddit down'));
     const bag = await buildPostFactBag(POST);
-    expect(bag['author.accountAgeHours']).toBe(0);
-    expect(bag['author.totalKarma']).toBe(0);
+    expect(bag['author.accountAgeHours']).toBe(ESTABLISHED);
+    expect(bag['author.totalKarma']).toBe(ESTABLISHED);
+    expect(bag['author.subJoinAgeHours']).toBe(ESTABLISHED);
     expect(bag['author.isModerator']).toBe(false);
     expect(bag['author.hasVerifiedEmail']).toBe(false);
   });
 
-  it('returns safe defaults when the user does not exist (null)', async () => {
+  it('returns fail-safe defaults when the user does not exist (null)', async () => {
     fakeReddit.getUserByUsername.mockResolvedValue(null);
     const bag = await buildPostFactBag(POST);
-    expect(bag['author.accountAgeHours']).toBe(0);
+    expect(bag['author.accountAgeHours']).toBe(ESTABLISHED);
+    expect(bag['author.totalKarma']).toBe(ESTABLISHED);
   });
 
   it('derives account age, karma, and mod status from the Reddit API', async () => {

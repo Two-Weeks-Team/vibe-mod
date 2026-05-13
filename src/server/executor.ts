@@ -3,10 +3,11 @@
 // HARD-CODED action whitelist. LLM cannot smuggle new verbs through.
 
 import { reddit, redis, settings } from '@devvit/web/server';
-import { GUARDED_ACTIONS, type ActionType, type RuleType } from '../shared/rule-schema';
+import type { ActionType, RuleType } from '../shared/rule-schema';
 import { asT1, asT3, getCurrentSubredditName } from './devvit-helpers';
 
 const ROLLBACK_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+const AUDIT_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days — audit detail hashes auto-expire
 
 export interface AuditEntry {
   actionId: string;
@@ -38,60 +39,60 @@ export async function executeActions(ctx: ExecutionContext): Promise<AuditEntry[
   const dryRunOnly = (await settings.get('dryRunOnly')) as boolean;
   const effectiveShadow = ctx.isShadowMode || ctx.isDryRun || dryRunOnly;
 
+  // A short-circuit (kill switch / circuit breaker / per-author rate limit)
+  // still produces audit rows so the Dashboard shows that a rule *tried* to act.
+  const shortCircuit = async (outcome: AuditEntry['outcome']): Promise<AuditEntry[]> => {
+    const entries = ctx.rule.then.map((act) => auditEntry(ctx, act.action, act.params, outcome));
+    for (const e of entries) await writeAudit(subName, e);
+    return entries;
+  };
+
   // Global kill switch (set by an admin menu action or remote ops procedure).
   // Used during beta to halt all action across all installs in seconds.
   // Intentionally NOT sub-scoped — one flag freezes every install.
-  const killSwitch = await redis.get('circuit:beta_freeze');
-  if (killSwitch === '1') {
-    return ctx.rule.then.map((act) => auditEntry(ctx, act.action, act.params, 'rate_limited'));
-  }
+  if ((await redis.get('circuit:beta_freeze')) === '1') return shortCircuit('rate_limited');
 
   // Per-sub rate-limit circuit breaker (set by the cron scheduler when this
   // sub's actions/hour exceed maxActionsPerHour). Key is sub-scoped to match
   // /internal/scheduler/rate-limit-circuit-breaker.
-  const breakerOpen = await redis.get(`${subName}:circuit:open`);
-  if (breakerOpen === '1') {
-    return ctx.rule.then.map((act) => auditEntry(ctx, act.action, act.params, 'rate_limited'));
-  }
+  if ((await redis.get(`${subName}:circuit:open`)) === '1') return shortCircuit('rate_limited');
 
-  // Per-rule per-author rate limit — atomic set NX prevents TOCTOU race
-  // (audit FIND-10 fix).
+  // Per-rule per-author rate limit — atomic "acquire once" prevents the TOCTOU
+  // race a plain get-then-set has (audit FIND-10 fix).
   if (ctx.rule.rateLimit?.perAuthor) {
     const window = ctx.rule.rateLimit.perAuthor;
     const ttl = window === '1/min' ? 60 : window === '1/hour' ? 3600 : 86400;
     const key = `${subName}:ratelimit:${ctx.rule.id}:${ctx.authorId}`;
-    // Atomic check-and-set: if already exists, return without acting
-    // (Devvit's redis client may not expose SET NX directly — emulate via
-    // watch+multi+exec for atomicity.)
-    const setNxLike = await trySetIfNotExists(key, '1', ttl);
-    if (!setNxLike) {
-      return ctx.rule.then.map((act) => auditEntry(ctx, act.action, act.params, 'rate_limited'));
-    }
+    if (!(await acquireOnce(key, ttl))) return shortCircuit('rate_limited');
   }
 
+  // NB: GUARDED actions (ban/mute/permaban) are NOT skipped here — they only
+  // reach a stored rule if the mod ticked "Allow ban/mute" at compile time, and
+  // they still go through the 24h shadow window and the circuit breaker like any
+  // other action, with a 30-day rollback. The compile-time gate (see
+  // /internal/form/compose-rule-submit) is the authorization point.
   for (const act of ctx.rule.then) {
-    // GUARDED actions skip silently unless explicitly allowed. v0.1: never auto-fires.
-    if ((GUARDED_ACTIONS as readonly string[]).includes(act.action) && !effectiveShadow) {
-      audits.push(auditEntry(ctx, act.action, act.params, 'guarded_skip'));
-      continue;
-    }
-
     if (effectiveShadow) {
-      audits.push(auditEntry(ctx, act.action, act.params, 'shadow'));
+      // Shadow / dry-run-only: record what *would* have happened (no action, no
+      // rollback token) so the Dashboard's log shows it — that's the whole point
+      // of the 24h shadow window.
+      const entry = auditEntry(ctx, act.action, act.params, 'shadow');
+      audits.push(entry);
+      await writeAudit(subName, entry);
       continue;
     }
 
-    // Execute + write audit + write rollback token atomically
     try {
       const reverseParams = await applyAction(act, ctx);
       const entry = auditEntry(ctx, act.action, act.params, 'applied');
       audits.push(entry);
-
       // Persist audit + rollback token (sub-scoped keys, matching the Dashboard
       // and Undo handlers which read `${sub}:audit`).
       await writeAuditAndRollback(subName, entry, reverseParams);
     } catch (err) {
-      audits.push(auditEntry(ctx, act.action, act.params, 'error', String(err)));
+      const entry = auditEntry(ctx, act.action, act.params, 'error', String(err));
+      audits.push(entry);
+      await writeAudit(subName, entry);
     }
   }
 
@@ -220,19 +221,15 @@ function newActionId(): string {
   return `a_${Date.now()}_${suffix}`;
 }
 
-// Atomic check-and-set replacement for SET NX (audit FIND-10 fix).
-async function trySetIfNotExists(key: string, value: string, ttlSeconds: number): Promise<boolean> {
-  const txn = await redis.watch(key);
-  const existing = await redis.get(key);
-  if (existing !== null && existing !== undefined) {
-    await txn.discard();
-    return false;
-  }
-  await txn.multi();
-  await txn.set(key, value);
-  await txn.expire(key, ttlSeconds);
-  await txn.exec();
-  return true;
+// "Acquire once": SET key=<unique token> NX with a TTL, then read it back — if
+// the stored value is our token, this call won the race; otherwise the key was
+// already held. Correct regardless of what `redis.set` returns on an NX miss
+// (the previous watch/multi/exec version never checked exec()'s result, so a
+// genuine concurrent race still double-acquired — audit FIND-10 / gap-analysis).
+export async function acquireOnce(key: string, ttlSeconds: number): Promise<boolean> {
+  const token = `${Date.now()}.${globalThis.crypto.getRandomValues(new Uint32Array(1))[0]}`;
+  await redis.set(key, token, { nx: true, expiration: new Date(Date.now() + ttlSeconds * 1000) });
+  return (await redis.get(key)) === token;
 }
 
 function auditEntry(
@@ -257,20 +254,16 @@ function auditEntry(
   };
 }
 
-async function writeAuditAndRollback(
-  subName: string,
-  entry: AuditEntry,
-  reverseParams: Record<string, unknown>,
-): Promise<void> {
-  // Use transaction so audit + rollback are atomic
-  const watchKey = `${subName}:audit:${entry.actionId}`;
-  const txn = await redis.watch(watchKey);
+// Append one audit row: a member in the time-ordered `${sub}:audit` ZSet plus a
+// detail hash with a 30-day TTL (so detail self-expires even if the daily
+// audit-retention cron is delayed or its zRange page-caps on a busy sub —
+// gap-analysis: otherwise these hashes leak unbounded → Redis quota). Used for
+// every outcome (shadow / applied / rate_limited / error) so the Dashboard log
+// reflects what each rule did or would have done.
+async function writeAudit(subName: string, entry: AuditEntry): Promise<void> {
+  const txn = await redis.watch(`${subName}:audit:${entry.actionId}`);
   await txn.multi();
-
-  // ZSET for time-ordered listing
   await txn.zAdd(`${subName}:audit`, { member: entry.actionId, score: entry.ts });
-
-  // Hash for audit detail
   await txn.hSet(`${subName}:audit:${entry.actionId}`, {
     ruleId: entry.ruleId,
     ruleSourceNL: entry.ruleSourceNL,
@@ -281,11 +274,22 @@ async function writeAuditAndRollback(
     authorName: entry.authorName,
     ts: String(entry.ts),
     outcome: entry.outcome,
+    ...(entry.errorMessage ? { errorMessage: entry.errorMessage.slice(0, 300) } : {}),
   });
-
-  // String key with TTL for rollback token (auto-expires at 30d)
-  await txn.set(`${subName}:rollback:${entry.actionId}`, JSON.stringify({ entry, reverseParams }));
-  await txn.expire(`${subName}:rollback:${entry.actionId}`, ROLLBACK_TTL_SECONDS);
-
+  await txn.expire(`${subName}:audit:${entry.actionId}`, AUDIT_TTL_SECONDS);
   await txn.exec();
+}
+
+// Applied actions additionally get a rollback token (auto-expires at 30d — set
+// atomically via the `expiration` option so a failed EXPIRE can't leave the
+// token TTL-less, like acquireOnce above).
+async function writeAuditAndRollback(
+  subName: string,
+  entry: AuditEntry,
+  reverseParams: Record<string, unknown>,
+): Promise<void> {
+  await writeAudit(subName, entry);
+  await redis.set(`${subName}:rollback:${entry.actionId}`, JSON.stringify({ entry, reverseParams }), {
+    expiration: new Date(Date.now() + ROLLBACK_TTL_SECONDS * 1000),
+  });
 }

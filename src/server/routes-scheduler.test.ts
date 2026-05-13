@@ -79,13 +79,13 @@ describe('POST /internal/scheduler/dry-run-replay', () => {
   });
 
   it('replays recent posts through a draft post-rule and records which would match', async () => {
-    // rule: matches authors with <50 karma (the mocked author defaults to 0 karma → matches)
+    // rule: matches short posts (the `post()` helper bodies are well under 50 chars)
     await fakeRedis.set(
       'testsub:rules:draft',
       JSON.stringify(
         bundleWith({
           id: 'r_lowk',
-          when: { fact: 'author.totalKarma', op: 'lt', value: 50 },
+          when: { fact: 'content.length', op: 'lt', value: 50 },
           then: [{ action: 'modqueue', params: { note: 'x' } }],
         }),
       ),
@@ -98,6 +98,31 @@ describe('POST /internal/scheduler/dry-run-replay', () => {
     expect(d.sampledPosts).toBe(2);
     expect(d.matched.map((m: { thingId: string }) => m.thingId)).toEqual(['t3_a', 't3_b']);
     expect(d.matched[0].would).toEqual(['modqueue']);
+  });
+
+  it('takes ZERO real moderation actions and writes no audit row, even when every post matches', async () => {
+    // Hard lock #3: the dry run must never act. Rule matches everything (length >= 0).
+    await fakeRedis.set(
+      'testsub:rules:draft',
+      JSON.stringify(
+        bundleWith({
+          id: 'r_all',
+          when: { fact: 'content.length', op: 'gte', value: 0 },
+          then: [{ action: 'remove', params: { spam: true } }],
+        }),
+      ),
+    );
+    fakeReddit.getNewPosts.mockReturnValue(fakeListing([post('t3_a'), post('t3_b'), post('t3_c')]));
+
+    await call('/internal/scheduler/dry-run-replay', { data: { ruleId: 'r_all', subredditName: 'testsub' } });
+
+    const d = JSON.parse((await fakeRedis.get('testsub:dryrun:r_all'))!);
+    expect(d.matched).toHaveLength(3); // it *would* match all three…
+    // …but it did nothing: no Reddit calls, no audit ZSet, no audit hashes.
+    expect(fakeReddit.report).not.toHaveBeenCalled();
+    expect(fakeReddit.getPostById).not.toHaveBeenCalled();
+    expect(fakeReddit.banUser).not.toHaveBeenCalled();
+    expect(await fakeRedis.zRange('testsub:audit', 0, -1)).toEqual([]);
   });
 
   it('records zero matches when no recent post satisfies the rule', async () => {

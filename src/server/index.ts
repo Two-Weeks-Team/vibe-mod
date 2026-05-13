@@ -30,7 +30,7 @@ import { seedStarterRules } from '../shared/starter-rules';
 import { VIBE_MOD_SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from '../shared/system-prompt';
 import { buildPostFactBag, buildCommentFactBag } from './fact-bag';
 import { selectMatchingRules } from './evaluator';
-import { executeActions, rollbackAction } from './executor';
+import { executeActions, rollbackAction, acquireOnce } from './executor';
 import { getCurrentSubredditName, getCurrentSubredditRef } from './devvit-helpers';
 
 const app = new Hono();
@@ -281,17 +281,15 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
   // Append to draft bundle (sub-scoped key)
   const draftKey = `${subredditName}:rules:draft`;
   const draftJson = await redis.get(draftKey);
-  const draft: RuleBundleType = draftJson
-    ? RuleBundle.parse(JSON.parse(draftJson))
-    : {
-        schemaVersion: '1.0.0',
-        bundleVersion: 0,
-        compiledAt: Date.now(),
-        llmModel: ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini',
-        llmTokensIn: 0,
-        llmTokensOut: 0,
-        rules: [],
-      };
+  const draft: RuleBundleType = safeParseBundle(draftJson, 'compose/draft') ?? {
+    schemaVersion: '1.0.0',
+    bundleVersion: 0,
+    compiledAt: Date.now(),
+    llmModel: ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini',
+    llmTokensIn: 0,
+    llmTokensOut: 0,
+    rules: [],
+  };
 
   const existingIdx = draft.rules.findIndex((r) => r.id === validated.id);
   if (existingIdx >= 0) draft.rules[existingIdx] = validated;
@@ -341,10 +339,8 @@ app.post('/internal/menu/dashboard', async (c) => {
   }
 
   const subredditName = getCurrentSubredditName();
-  const activeJson = await redis.get(`${subredditName}:rules:active`);
-  const draftJson = await redis.get(`${subredditName}:rules:draft`);
-  const active: RuleBundleType | null = activeJson ? JSON.parse(activeJson) : null;
-  const draft: RuleBundleType | null = draftJson ? JSON.parse(draftJson) : null;
+  const active = safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'dashboard/active');
+  const draft = safeParseBundle(await redis.get(`${subredditName}:rules:draft`), 'dashboard/draft');
 
   const auditKey = `${subredditName}:audit`;
   const recentIds = await redis.zRange(auditKey, 0, 19, { by: 'rank', reverse: true });
@@ -403,11 +399,23 @@ app.post('/internal/form/dashboard-action', async (c) => {
   if (!activate) return c.json<UiResponse>({ showToast: 'No action taken.' });
 
   const subredditName = getCurrentSubredditName();
-  const draftKey = `${subredditName}:rules:draft`;
-  const draftJson = await redis.get(draftKey);
-  if (!draftJson) return c.json<UiResponse>({ showToast: 'No draft to activate.' });
+  const draft = safeParseBundle(await redis.get(`${subredditName}:rules:draft`), 'activate/draft');
+  if (!draft || draft.rules.length === 0) return c.json<UiResponse>({ showToast: 'No draft to activate.' });
 
-  await redis.set(`${subredditName}:rules:active`, draftJson);
+  // Stamp the activation time so the shadow-mode window is measured from when the
+  // rule actually went live, not from when it was compiled (a draft that sits
+  // for >shadowDurationHours would otherwise go live the instant it's activated).
+  // Carry over an existing activatedAt for a rule that's already active under the
+  // same id (re-activating after an edit must not reset its shadow clock).
+  const prevActivatedAt = new Map<string, number>(
+    (safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'activate/prev-active')?.rules ?? [])
+      .filter((r): r is RuleType & { activatedAt: number } => typeof r.activatedAt === 'number')
+      .map((r) => [r.id, r.activatedAt]),
+  );
+  const now = Date.now();
+  for (const r of draft.rules) r.activatedAt ??= prevActivatedAt.get(r.id) ?? now;
+
+  await redis.set(`${subredditName}:rules:active`, JSON.stringify(draft));
   return c.json<UiResponse>({
     showToast: {
       text: 'Draft activated. Shadow mode is ON by default — promote per rule in next 24h.',
@@ -457,18 +465,24 @@ app.post('/internal/menu/undo-action', async (c) => {
 async function isDuplicateTrigger(trigger: string, thingId: string): Promise<boolean> {
   const subName = getCurrentSubredditName();
   const dedupeKey = `${subName}:seen:${trigger}:${thingId}`;
-  // Try-set-if-not-exists with TTL. If set, we just observed it for the first time.
-  const txn = await redis.watch(dedupeKey);
-  const existing = await redis.get(dedupeKey);
-  if (existing !== null && existing !== undefined) {
-    await txn.discard();
-    return true;
+  // We process this trigger iff we win the "acquire once" race; otherwise it's
+  // a duplicate delivery (audit Gap #5 — the old watch/multi/exec never checked
+  // exec()'s result, so a real concurrent re-delivery still double-processed).
+  return !(await acquireOnce(dedupeKey, TRIGGER_DEDUPE_SECONDS));
+}
+
+// Parse a persisted RuleBundle, returning null (treated as "no rules" — the
+// fail-SAFE direction, since every action is restrictive) if the stored JSON is
+// missing, malformed, or fails schema validation. A bad write must never 500 the
+// trigger path for every post/comment in the sub (gap-analysis).
+function safeParseBundle(raw: string | null | undefined, context: string): RuleBundleType | null {
+  if (!raw) return null;
+  try {
+    return RuleBundle.parse(JSON.parse(raw));
+  } catch (err) {
+    console.error(`[vibe-mod] ignoring malformed rule bundle (${context}):`, err);
+    return null;
   }
-  await txn.multi();
-  await txn.set(dedupeKey, '1');
-  await txn.expire(dedupeKey, TRIGGER_DEDUPE_SECONDS);
-  await txn.exec();
-  return false;
 }
 
 app.post('/internal/trigger/on-post-submit', async (c) => {
@@ -492,10 +506,8 @@ app.post('/internal/trigger/on-post-submit', async (c) => {
   });
 
   const subredditName = getCurrentSubredditName();
-  const rulesJson = await redis.get(`${subredditName}:rules:active`);
-  if (!rulesJson) return c.json<TriggerResponse>({ status: 'ok' });
-
-  const bundle = RuleBundle.parse(JSON.parse(rulesJson));
+  const bundle = safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'on-post-submit');
+  if (!bundle) return c.json<TriggerResponse>({ status: 'ok' });
   const matching = selectMatchingRules(bundle.rules, 'onPostSubmit', facts);
 
   for (const rule of matching) {
@@ -533,10 +545,8 @@ app.post('/internal/trigger/on-comment-submit', async (c) => {
   });
 
   const subredditName = getCurrentSubredditName();
-  const rulesJson = await redis.get(`${subredditName}:rules:active`);
-  if (!rulesJson) return c.json<TriggerResponse>({ status: 'ok' });
-
-  const bundle = RuleBundle.parse(JSON.parse(rulesJson));
+  const bundle = safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'on-comment-submit');
+  if (!bundle) return c.json<TriggerResponse>({ status: 'ok' });
   const matching = selectMatchingRules(bundle.rules, 'onCommentSubmit', facts);
 
   for (const rule of matching) {
@@ -707,16 +717,18 @@ app.post('/internal/scheduler/shadow-promote-check', async (c) => {
   const shadowHours = ((await settings.get('shadowDurationHours')) as number) ?? 24;
   if (shadowHours <= 0) return c.json<TaskResponse>({ status: 'ok' });
 
-  const activeJson = await redis.get(`${subredditName}:rules:active`);
-  if (!activeJson) return c.json<TaskResponse>({ status: 'ok' });
+  const bundle = safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'shadow-promote-check');
+  if (!bundle) return c.json<TaskResponse>({ status: 'ok' });
 
-  const bundle = RuleBundle.parse(JSON.parse(activeJson));
   const now = Date.now();
   const cutoff = shadowHours * 3_600_000;
 
   let changed = false;
   for (const r of bundle.rules) {
-    if (r.shadow && now - r.createdAt >= cutoff) {
+    // Measure the shadow window from activation time (falling back to compile
+    // time for rules activated before this field existed).
+    const since = r.activatedAt ?? r.createdAt;
+    if (r.shadow && now - since >= cutoff) {
       r.shadow = false;
       changed = true;
     }
@@ -798,11 +810,14 @@ async function callOpenAI(
     messages.push({ role: 'user', content: ex.user });
     messages.push({ role: 'assistant', content: JSON.stringify(ex.assistant) });
   }
-  // Original rule
-  messages.push({ role: 'user', content: userRule });
-  // Clarification answer as separate turn (audit FIND-11 fix — no concat into user content)
-  if (clarificationAnswer?.trim()) {
-    messages.push({ role: 'user', content: `Clarification: ${clarificationAnswer.trim()}` });
+  // Original rule (capped — the form layer doesn't bound length; keep the prompt
+  // budget predictable and limit the prompt-injection surface).
+  messages.push({ role: 'user', content: userRule.slice(0, 1000) });
+  // Clarification answer as a separate turn (audit FIND-11: no string concat into
+  // the original user content), also length-capped (gap-analysis SEC-03).
+  const clarif = clarificationAnswer?.trim().slice(0, 500);
+  if (clarif) {
+    messages.push({ role: 'user', content: `Clarification: ${clarif}` });
   }
 
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {
