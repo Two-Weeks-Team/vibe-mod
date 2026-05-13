@@ -1264,22 +1264,29 @@ async function callOpenAI(
   }
   void globalKeyLength; // referenced for type-narrowing; we already logged it above
 
-  // Hardcoded model temporarily: every probe(b)(d)(e)(f) that returned HTTP
-  // 200 in production used `gpt-5.4-nano`. callOpenAI defaults to
-  // `gpt-5.4-mini`, which probes never tested in production. PR #32-#37
-  // shipped many body shapes; all still HTTP 400 ("could not parse JSON").
-  // Pinning to the probe-verified model isolates whether the model itself
-  // is what differs between probe-success and callOpenAI-failure.
-  const model = 'gpt-5.4-nano';
-  let settingsModel: string | null = null;
+  // 2026-05-14: ROOT CAUSE of PR #32-#37 "could not parse JSON body" in prod.
+  // `settings.get('openaiModel')` on a SELECTION-type field returns a string
+  // ARRAY (e.g. `["gpt-5.4-mini"]`), not a string. We were sending the array
+  // straight into the request body as `"model": ["gpt-5.4-mini"]` -- which
+  // OpenAI rejected as unparseable JSON for the `model` field. PR #38 only
+  // worked around this by hardcoding `gpt-5.4-nano`. Real fix: unwrap.
+  //
+  // Production proof (v0.0.39 logs):
+  //   [vibe-mod] callOpenAI: settings.get(openaiModel) = ["gpt-5.4-mini"]
+  //
+  // Devvit settings docs: SELECTION type returns string[] even for single
+  // selection.
+  const DEFAULT_MODEL = 'gpt-5.4-mini';
+  let model = DEFAULT_MODEL;
   try {
-    settingsModel = ((await settings.get('openaiModel')) as string) || null;
-    console.log('[vibe-mod] callOpenAI: settings.get(openaiModel) =', JSON.stringify(settingsModel));
+    const raw = await settings.get('openaiModel');
+    let unwrapped: unknown = raw;
+    if (Array.isArray(raw) && raw.length > 0) unwrapped = raw[0];
+    if (typeof unwrapped === 'string' && unwrapped.trim()) model = unwrapped.trim();
+    console.log('[vibe-mod] callOpenAI: openaiModel raw =', JSON.stringify(raw), 'unwrapped =', JSON.stringify(model));
   } catch (err) {
-    console.warn('[vibe-mod] callOpenAI: settings.get(openaiModel) threw — using nano default:', describeErr(err));
+    console.warn('[vibe-mod] callOpenAI: settings.get(openaiModel) threw — using default:', describeErr(err));
   }
-  void settingsModel;
-  console.log('[vibe-mod] callOpenAI: model resolved =', model);
 
   // Single user message containing system instructions, few-shot examples, and
   // the user rule (+ optional clarification), all inline.
@@ -1303,60 +1310,28 @@ async function callOpenAI(
   // model still learns the rule-compilation pattern. Length caps preserved
   // (rule ≤ 1000, clarification ≤ 500) for prompt-injection surface control.
   const clarif = clarificationAnswer?.trim().slice(0, 500);
-  // Round-6 strategy: remove ALL JSON syntax (`{` `}` `[` `]` `:` `"` `,`)
-  // from the message content. The wire body still contains JSON because the
-  // outer JSON.stringify wraps {model, messages, ...}, but the content STRING
-  // sent inside `"content": "..."` no longer holds nested JSON characters
-  // that produce `\"`/`\\` escape sequences when re-stringified.
+  // Now that the model-array bug (PR #38 #39) is fixed, restore proper
+  // few-shot examples with concrete JSON. The flattened key=value format
+  // (PR #37) caused the model to emit `{"modqueue":{...}}` instead of
+  // `{"action":"modqueue","params":{...}}` — a downstream toast on v0.0.39
+  // surfaced "The compiled rule contained an action this app does not
+  // support." Restoring `JSON.stringify(ex.assistant)` re-teaches the schema.
   //
-  // Hypothesis: Devvit's HTTP plugin transit corrupts bodies where the inner
-  // content string contains a high density of JSON-escape sequences. probe(b)
-  // at 121 B had ~4 `\"` and was 200; v0.0.37 at 4401 B had ~70+ `\"` and was
-  // 400. Strip them entirely and see if the body lands.
-  //
-  // We replace JSON.stringify(ex.assistant) with a structured plain-English
-  // outline of the same data, using `=` instead of `:` and `;` instead of `,`
-  // and no quotes. The model still learns the rule shape because the system
-  // prompt teaches the JSON schema, and `response_format: { type: 'json_object' }`
-  // forces strict-JSON output.
+  // Single-user composition is preserved (PR #32) because it's a robust
+  // packaging choice independent of the model bug.
   const collapse = (s: string) => s.replace(/\s+/g, ' ').trim();
-  // Recursively flatten any value to a JSON-syntax-free string. Keys use
-  // `key=value`, arrays use `[a; b; c]`-but-with-no-brackets style, objects
-  // are space-separated `key=value` pairs.
-  const flattenValue = (v: unknown): string => {
-    if (v == null) return 'null';
-    if (typeof v === 'string') return v.replace(/\s+/g, ' ');
-    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-    if (Array.isArray(v)) return v.map(flattenValue).join(' or ');
-    if (typeof v === 'object') {
-      return Object.entries(v as Record<string, unknown>)
-        .map(([k, val]) => `${k}=${flattenValue(val)}`)
-        .join(' ');
-    }
-    return String(v);
-  };
-  const flattenExample = (ex: (typeof FEW_SHOT_EXAMPLES)[number]): string => {
-    const obj = ex.assistant as Record<string, unknown>;
-    const flat = Object.entries(obj)
-      .map(([k, v]) => `${k}=${flattenValue(v)}`)
-      .join('; ');
-    return `EXAMPLE INPUT ${collapse(ex.user)} EXAMPLE OUTPUT ${flat}`;
-  };
-  const SHORT_PROMPT_CHARS = 3500;
-  const systemShort = collapse(VIBE_MOD_SYSTEM_PROMPT).slice(0, SHORT_PROMPT_CHARS);
-  const firstExample = FEW_SHOT_EXAMPLES[0];
-  const exampleText = firstExample ? flattenExample(firstExample) : '';
+  const exampleBlock = (ex: (typeof FEW_SHOT_EXAMPLES)[number], i: number): string =>
+    `EXAMPLE ${i + 1} INPUT: ${collapse(ex.user)} EXAMPLE ${i + 1} OUTPUT: ${JSON.stringify(ex.assistant)}`;
   const compositeContent = [
-    'SYSTEM INSTRUCTIONS',
-    systemShort,
-    exampleText,
-    'TASK INPUT',
+    'SYSTEM INSTRUCTIONS:',
+    collapse(VIBE_MOD_SYSTEM_PROMPT),
+    'EXAMPLES:',
+    ...FEW_SHOT_EXAMPLES.map(exampleBlock),
+    'TASK INPUT:',
     collapse(userRule.slice(0, 1000)),
-    ...(clarif ? ['TASK CLARIFICATION', collapse(clarif)] : []),
-    'OUTPUT strict JSON only no prose',
-  ]
-    .filter(Boolean)
-    .join(' ');
+    ...(clarif ? ['TASK CLARIFICATION:', collapse(clarif)] : []),
+    'OUTPUT (strict JSON object only, no prose):',
+  ].join(' ');
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'user', content: compositeContent },
   ];
