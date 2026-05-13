@@ -42,7 +42,10 @@ NOTES ON A FEW FACTS:
   - content.upperCaseRatio / content.title.upperCaseRatio   0..1; >0.7 ≈ "shouting"
   - content.nonAsciiRatio    0..1 fraction of non-ASCII chars; high ≈ non-Latin / likely non-English
   - content.isLinkPost       true for a link/image/video submission; false for comments
+  - content.over18           the POST's own NSFW flag (not the subreddit's); false for comments
+  - content.isVideo / content.isSpoiler / content.isCrosspost   post flags; all false for comments
   - content.url / content.urlDomain   full link / hostname of a link post ('' for text posts and comments)
+  - author.totalKarma = author.postKarma + author.commentKarma   (use postKarma/commentKarma when the mod distinguishes them)
 
 Action verbs (closed set):
   SAFE (use freely):     ${SAFE}
