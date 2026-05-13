@@ -405,8 +405,15 @@ app.post('/internal/form/dashboard-action', async (c) => {
   // Stamp the activation time so the shadow-mode window is measured from when the
   // rule actually went live, not from when it was compiled (a draft that sits
   // for >shadowDurationHours would otherwise go live the instant it's activated).
+  // Carry over an existing activatedAt for a rule that's already active under the
+  // same id (re-activating after an edit must not reset its shadow clock).
+  const prevActivatedAt = new Map<string, number>(
+    (safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'activate/prev-active')?.rules ?? [])
+      .filter((r): r is RuleType & { activatedAt: number } => typeof r.activatedAt === 'number')
+      .map((r) => [r.id, r.activatedAt]),
+  );
   const now = Date.now();
-  for (const r of draft.rules) r.activatedAt ??= now;
+  for (const r of draft.rules) r.activatedAt ??= prevActivatedAt.get(r.id) ?? now;
 
   await redis.set(`${subredditName}:rules:active`, JSON.stringify(draft));
   return c.json<UiResponse>({

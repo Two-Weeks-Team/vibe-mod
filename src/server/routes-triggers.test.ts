@@ -108,7 +108,9 @@ describe('POST /internal/trigger/on-post-submit', () => {
 
     await call('/internal/trigger/on-post-submit', POST_EVENT);
     expect(fakeReddit.report).not.toHaveBeenCalled();
-    expect((await fakeRedis.zRange('testsub:audit', 0, -1)).map((e) => e.score >= 0)).toEqual([true]); // a shadow row was written
+    const ids = await fakeRedis.zRange('testsub:audit', 0, -1);
+    expect(ids).toHaveLength(1);
+    expect((await fakeRedis.hGetAll(`testsub:audit:${ids[0].member}`)).outcome).toBe('shadow');
   });
 
   it('is a safe no-op when the persisted active bundle is malformed JSON (never 500s the trigger)', async () => {
