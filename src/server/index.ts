@@ -614,7 +614,20 @@ app.post('/internal/form/dashboard-action', async (c) => {
   if (!activate) return c.json<UiResponse>({ showToast: 'No action taken.' });
 
   const subredditName = getCurrentSubredditName();
-  const draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'activate/draft');
+  // Best-effort — reddit/devvit#258. Every redis touch wrapped so the user
+  // sees an explanatory toast rather than 500.
+  let draft: RuleBundleType | null = null;
+  try {
+    draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'activate/draft');
+  } catch (err) {
+    console.warn('[vibe-mod] activate: redis.get(draft) threw:', describeErr(err));
+    return c.json<UiResponse>({
+      showToast: {
+        text: 'Plugin RPC unreachable (reddit/devvit#258). Cannot activate rules until the platform is restored.',
+        appearance: 'neutral',
+      },
+    });
+  }
   if (!draft || draft.rules.length === 0) return c.json<UiResponse>({ showToast: 'No draft to activate.' });
 
   // Stamp the activation time so the shadow-mode window is measured from when the
@@ -622,15 +635,30 @@ app.post('/internal/form/dashboard-action', async (c) => {
   // for >shadowDurationHours would otherwise go live the instant it's activated).
   // Carry over an existing activatedAt for a rule that's already active under the
   // same id (re-activating after an edit must not reset its shadow clock).
-  const prevActivatedAt = new Map<string, number>(
-    (safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'activate/prev-active')?.rules ?? [])
-      .filter((r): r is RuleType & { activatedAt: number } => typeof r.activatedAt === 'number')
-      .map((r) => [r.id, r.activatedAt]),
-  );
+  let prevActivatedAt = new Map<string, number>();
+  try {
+    prevActivatedAt = new Map<string, number>(
+      (safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'activate/prev-active')?.rules ?? [])
+        .filter((r): r is RuleType & { activatedAt: number } => typeof r.activatedAt === 'number')
+        .map((r) => [r.id, r.activatedAt]),
+    );
+  } catch (err) {
+    console.warn('[vibe-mod] activate: redis.get(prev-active) threw — treating as none:', describeErr(err));
+  }
   const now = Date.now();
   for (const r of draft.rules) r.activatedAt ??= prevActivatedAt.get(r.id) ?? now;
 
-  await redis.set(keys.rulesActive(subredditName), JSON.stringify(draft));
+  try {
+    await redis.set(keys.rulesActive(subredditName), JSON.stringify(draft));
+  } catch (err) {
+    console.warn('[vibe-mod] activate: redis.set(active) threw:', describeErr(err));
+    return c.json<UiResponse>({
+      showToast: {
+        text: 'Activation failed — plugin RPC unreachable (reddit/devvit#258).',
+        appearance: 'neutral',
+      },
+    });
+  }
   return c.json<UiResponse>({
     showToast: {
       text: 'Draft activated. Shadow mode is ON by default — promote per rule in next 24h.',
@@ -650,14 +678,32 @@ app.post('/internal/menu/undo-action', async (c) => {
   if (!targetId) return c.json<UiResponse>({ showToast: 'No target.' });
 
   const subredditName = getCurrentSubredditName();
-  const auditKey = keys.audit(subredditName);
-  const recentIds = await redis.zRange(auditKey, 0, 99, { by: 'rank', reverse: true });
+  // Best-effort — reddit/devvit#258 may make every redis read throw. Return
+  // an informative toast instead of 500 so the user sees what's happening.
+  let recentIds: Array<{ member: string | number }> = [];
+  try {
+    const auditKey = keys.audit(subredditName);
+    recentIds = await redis.zRange(auditKey, 0, 99, { by: 'rank', reverse: true });
+  } catch (err) {
+    console.warn('[vibe-mod] undo: redis.zRange(audit) threw:', describeErr(err));
+    return c.json<UiResponse>({
+      showToast: {
+        text: 'Audit log unreachable (reddit/devvit#258). Undo cannot run until plugin RPC is restored.',
+        appearance: 'neutral',
+      },
+    });
+  }
+
   let found: string | null = null;
   for (const m of recentIds) {
-    const h = await redis.hGetAll(keys.auditEntry(subredditName, m.member));
-    if (h.thingId === targetId && h.outcome === 'applied' && !h.rolledBack) {
-      found = m.member as string;
-      break;
+    try {
+      const h = await redis.hGetAll(keys.auditEntry(subredditName, m.member as string));
+      if (h.thingId === targetId && h.outcome === 'applied' && !h.rolledBack) {
+        found = m.member as string;
+        break;
+      }
+    } catch (err) {
+      console.warn('[vibe-mod] undo: redis.hGetAll(entry) threw — skipping:', describeErr(err));
     }
   }
   if (!found)
@@ -665,13 +711,20 @@ app.post('/internal/menu/undo-action', async (c) => {
       showToast: 'No vibe-mod action found for this item (or already rolled back, or window expired).',
     });
 
-  const result = await rollbackAction(subredditName, found);
-  return c.json<UiResponse>({
-    showToast: {
-      text: result.ok ? 'Rolled back.' : `Couldn't roll back: ${result.reason}`,
-      appearance: result.ok ? 'success' : 'neutral',
-    },
-  });
+  try {
+    const result = await rollbackAction(subredditName, found);
+    return c.json<UiResponse>({
+      showToast: {
+        text: result.ok ? 'Rolled back.' : `Couldn't roll back: ${result.reason}`,
+        appearance: result.ok ? 'success' : 'neutral',
+      },
+    });
+  } catch (err) {
+    console.warn('[vibe-mod] undo: rollbackAction threw:', describeErr(err));
+    return c.json<UiResponse>({
+      showToast: { text: 'Rollback failed — plugin RPC unreachable.', appearance: 'neutral' },
+    });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -843,17 +896,22 @@ app.post('/internal/trigger/on-comment-report', async (c) => {
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/internal/scheduler/audit-retention', async (c) => {
   await c.req.json<TaskRequest>();
-  const subredditName = getCurrentSubredditName();
-  const auditKey = keys.audit(subredditName);
-  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  // Best-effort — plugin RPC may be down (reddit/devvit#258). The scheduler
+  // retries every 24h regardless; if redis is unreachable the gateway just
+  // sees a 200 (no-op) instead of an error every tick.
+  try {
+    const subredditName = getCurrentSubredditName();
+    const auditKey = keys.audit(subredditName);
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
-  // 1. Get IDs to delete (so we can also delete their hashes)
-  const toDelete = await redis.zRange(auditKey, 0, cutoff, { by: 'score' });
-  for (const m of toDelete) {
-    await redis.del(keys.auditEntry(subredditName, m.member));
+    const toDelete = await redis.zRange(auditKey, 0, cutoff, { by: 'score' });
+    for (const m of toDelete) {
+      await redis.del(keys.auditEntry(subredditName, m.member));
+    }
+    await redis.zRemRangeByScore(auditKey, 0, cutoff);
+  } catch (err) {
+    console.warn('[vibe-mod] scheduler/audit-retention: plugin RPC failed:', describeErr(err));
   }
-  // 2. Remove from ZSet
-  await redis.zRemRangeByScore(auditKey, 0, cutoff);
   return c.json<TaskResponse>({ status: 'ok' });
 });
 
@@ -940,18 +998,38 @@ app.post('/internal/scheduler/dry-run-replay', async (c) => {
     result.note = `Dry-run replay couldn't complete (${String(err).slice(0, 120)}). Activate in shadow mode to observe live behaviour instead.`;
   }
 
-  await redis.set(keys.dryrun(sub, ruleId), JSON.stringify(result));
-  await redis.expire(keys.dryrun(sub, ruleId), LIMITS.DRY_RUN_TTL_SECONDS);
+  try {
+    await redis.set(keys.dryrun(sub, ruleId), JSON.stringify(result));
+    await redis.expire(keys.dryrun(sub, ruleId), LIMITS.DRY_RUN_TTL_SECONDS);
+  } catch (err) {
+    console.warn('[vibe-mod] scheduler/dry-run-replay: redis.set(result) failed:', describeErr(err));
+  }
   return c.json<TaskResponse>({ status: 'ok' });
 });
 
 app.post('/internal/scheduler/shadow-promote-check', async (c) => {
   await c.req.json<TaskRequest>();
   const subredditName = getCurrentSubredditName();
-  const shadowHours = ((await settings.get('shadowDurationHours')) as number) ?? 24;
+  // Best-effort — plugin RPC may be down (reddit/devvit#258). Re-runs every
+  // 15 min; returning 200 instead of 500 keeps the gateway calm.
+  let shadowHours = 24;
+  try {
+    shadowHours = ((await settings.get('shadowDurationHours')) as number) ?? 24;
+  } catch (err) {
+    console.warn(
+      '[vibe-mod] scheduler/shadow-promote-check: settings.get threw — using default 24h:',
+      describeErr(err),
+    );
+  }
   if (shadowHours <= 0) return c.json<TaskResponse>({ status: 'ok' });
 
-  const bundle = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'shadow-promote-check');
+  let bundle: RuleBundleType | null = null;
+  try {
+    bundle = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'shadow-promote-check');
+  } catch (err) {
+    console.warn('[vibe-mod] scheduler/shadow-promote-check: redis.get failed:', describeErr(err));
+    return c.json<TaskResponse>({ status: 'ok' });
+  }
   if (!bundle) return c.json<TaskResponse>({ status: 'ok' });
 
   const now = Date.now();
@@ -967,7 +1045,13 @@ app.post('/internal/scheduler/shadow-promote-check', async (c) => {
       changed = true;
     }
   }
-  if (changed) await redis.set(keys.rulesActive(subredditName), JSON.stringify(bundle));
+  if (changed) {
+    try {
+      await redis.set(keys.rulesActive(subredditName), JSON.stringify(bundle));
+    } catch (err) {
+      console.warn('[vibe-mod] scheduler/shadow-promote-check: redis.set failed:', describeErr(err));
+    }
+  }
   return c.json<TaskResponse>({ status: 'ok' });
 });
 
@@ -983,19 +1067,30 @@ app.post('/internal/scheduler/rate-limit-circuit-breaker', async (c) => {
     console.log('[vibe-mod] scheduler/rate-limit: settings.get OK, maxPerHour=', maxPerHour);
   } catch (err) {
     console.warn('[vibe-mod] scheduler/rate-limit: settings.get threw:', describeErr(err));
-    // Don't 500 the scheduler — log and proceed with default. Otherwise Devvit
-    // retries and the same error spams the logs every 5 min.
   }
   const oneHourAgo = Date.now() - 3_600_000;
 
   // FIND-04 fix: count audit entries in the last-hour SCORE window, not all-time.
   // The Devvit redis client has no zCount, so range-scan by score and count.
-  const auditKey = keys.audit(subredditName);
-  const recentCount = (await redis.zRange(auditKey, oneHourAgo, Number.MAX_SAFE_INTEGER, { by: 'score' })).length;
+  // Best-effort — reddit/devvit#258. If redis is unreachable we have no audit
+  // count → there's nothing to circuit-breaker; return 200 and let the next
+  // tick try again.
+  let recentCount = 0;
+  try {
+    const auditKey = keys.audit(subredditName);
+    recentCount = (await redis.zRange(auditKey, oneHourAgo, Number.MAX_SAFE_INTEGER, { by: 'score' })).length;
+  } catch (err) {
+    console.warn('[vibe-mod] scheduler/rate-limit: redis.zRange(audit) threw — skipping check:', describeErr(err));
+    return c.json<TaskResponse>({ status: 'ok' });
+  }
 
   if (recentCount > maxPerHour) {
-    await redis.set(keys.circuitOpen(subredditName), '1');
-    await redis.expire(keys.circuitOpen(subredditName), 600);
+    try {
+      await redis.set(keys.circuitOpen(subredditName), '1');
+      await redis.expire(keys.circuitOpen(subredditName), 600);
+    } catch (err) {
+      console.warn('[vibe-mod] scheduler/rate-limit: redis.set(circuitOpen) failed:', describeErr(err));
+    }
 
     try {
       await reddit.modMail.createModNotification({
