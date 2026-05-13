@@ -176,13 +176,14 @@ per rule edit, on the moderator's sentence only. Runtime evaluation is pure, det
 
 **Project Impact (which Reddit communities will use this & how):**
 > vibe-mod is built for the long tail of small-to-mid subreddits whose mod teams don't have an AutoMod
-> specialist — exactly the communities AutoMod's syntax leaves behind. Concretely we're targeting
-> `<<community 1 — e.g. a hobby sub the team mods>>`, `<<community 2>>`, and `<<community 3>>`, where the
-> recurring need is "catch low-effort / new-account / ALL-CAPS posts" — rules that are one English
-> sentence in vibe-mod and a fiddly regex block in AutoMod. Shadow mode + dry-run + 30-day undo mean a
-> mod can adopt it without betting their queue on a rule they wrote in 20 seconds.
-> *(Replace the placeholders with the actual demo/beta subreddits before submitting; keep each < 200
-> subscribers and invite-only for the demo per hackathon rules.)*
+> specialist — exactly the communities AutoMod's syntax leaves behind. We're running it first in
+> **r/SocialSeeding** (our own community, where vibe-mod handles "no spam / no low-effort / new-account"
+> rules), and `<<beta community 2>>`, `<<beta community 3>>` — places where the recurring need is "catch
+> low-effort / new-account / ALL-CAPS / link-spam posts": one English sentence in vibe-mod, a fiddly
+> regex block in AutoMod. Shadow mode + dry-run preview + 30-day undo mean a mod can adopt it without
+> betting their queue on a rule they wrote in 20 seconds.
+> *(Add the real beta subreddits before submitting; keep each < 200 subscribers per the hackathon rule
+> for test/demo communities.)*
 
 **Hackathon / category:** Mod Tools and Migrated Apps Hackathon — Best New Mod Tool.
 
