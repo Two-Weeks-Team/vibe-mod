@@ -44,18 +44,19 @@
     ]
   },
   "dependencies": {
-    "@devvit/web": "^0.12.22",
+    "@devvit/web": "0.12.23",
     "@hono/node-server": "^2.0.2",
     "hono": "^4.12.18",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@devvit/start": "^0.12.23",
     "@devvit/test": "^0.12.23",
     "@eslint/js": "^9.39.4",
     "@types/node": "^25.6.2",
     "@vitest/coverage-v8": "^4.1.5",
     "@vitest/eslint-plugin": "^1.6.17",
-    "devvit": "^0.12.22",
+    "devvit": "0.12.23",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
     "fast-check": "^4.7.0",
