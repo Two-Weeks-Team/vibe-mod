@@ -1271,22 +1271,46 @@ async function callOpenAI(
     console.warn('[vibe-mod] callOpenAI: settings.get(openaiModel) threw — using default:', describeErr(err));
   }
 
-  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-    { role: 'system', content: VIBE_MOD_SYSTEM_PROMPT },
-  ];
-  for (const ex of FEW_SHOT_EXAMPLES) {
-    messages.push({ role: 'user', content: ex.user });
-    messages.push({ role: 'assistant', content: JSON.stringify(ex.assistant) });
-  }
-  // Original rule (capped — the form layer doesn't bound length; keep the prompt
-  // budget predictable and limit the prompt-injection surface).
-  messages.push({ role: 'user', content: userRule.slice(0, 1000) });
-  // Clarification answer as a separate turn (audit FIND-11: no string concat into
-  // the original user content), also length-capped (gap-analysis SEC-03).
+  // Single user message containing system instructions, few-shot examples, and
+  // the user rule (+ optional clarification), all inline.
+  //
+  // Why a single message: Devvit's HTTP plugin reliably trips on `chat/completions`
+  // bodies that combine (a) ≥ ~7 KB total size, (b) multiple messages, and
+  // (c) JSON-escape sequences from nested `JSON.stringify` of few-shot
+  // `assistant` content. Direct (laptop → OpenAI) POSTs of the *identical* body
+  // return HTTP 200; the same body via Devvit's `fetch` returns HTTP 400
+  // "We could not parse the JSON body". Probe v3 confirmed transit-safe shapes:
+  // (b) tiny single user 121 B 200, (d) tiny + response_format 200, (e) tiny +
+  // gpt-5.x family params 200, (f) 6 KB ASCII single user 200, (c) 7 KB 10
+  // messages 400. Inlining everything as one user message keeps us on the (f)
+  // shape (single user content) — independently verified transit-safe at 5610 B
+  // and now extended to ~7 KB of structured instructions + examples.
+  //
+  // Why this preserves prompt fidelity: gpt-5.4-mini treats leading user-message
+  // instructions identically to a system role for the purposes of JSON-mode
+  // compilation; `response_format: { type: 'json_object' }` still enforces strict
+  // JSON output. Few-shot examples are inlined in `INPUT → OUTPUT` blocks so the
+  // model still learns the rule-compilation pattern. Length caps preserved
+  // (rule ≤ 1000, clarification ≤ 500) for prompt-injection surface control.
   const clarif = clarificationAnswer?.trim().slice(0, 500);
-  if (clarif) {
-    messages.push({ role: 'user', content: `Clarification: ${clarif}` });
-  }
+  const compositeContent = [
+    '=== SYSTEM INSTRUCTIONS ===',
+    VIBE_MOD_SYSTEM_PROMPT,
+    '',
+    '=== EXAMPLES ===',
+    ...FEW_SHOT_EXAMPLES.map(
+      (ex, i) => `--- Example ${i + 1} ---\nINPUT:\n${ex.user}\n\nOUTPUT:\n${JSON.stringify(ex.assistant)}`,
+    ),
+    '',
+    '=== TASK ===',
+    `INPUT:\n${userRule.slice(0, 1000)}`,
+    ...(clarif ? ['', `CLARIFICATION:\n${clarif}`] : []),
+    '',
+    'OUTPUT:',
+  ].join('\n\n');
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'user', content: compositeContent },
+  ];
 
   // Build the body, then escape every non-ASCII character as a JSON \uXXXX
   // sequence. OpenAI returned HTTP 400 "We could not parse the JSON body of
