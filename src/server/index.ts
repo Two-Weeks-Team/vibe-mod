@@ -334,11 +334,19 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     tokensOut = result.tokensOut;
   } catch (err) {
     // Don't leak the error message — it could echo back compile context.
-    // Distinguish "no key" (settings.get fails or key missing) from network/API errors.
+    // Distinguish three failure shapes so the moderator sees an actionable
+    // message: plugin RPC blocked (Devvit platform bug), key not configured,
+    // or OpenAI/network error.
     const msg = String((err as Error)?.message ?? err);
-    const userMsg = msg.includes('no_key')
-      ? 'Compiler offline (plugin RPC unreachable — see reddit/devvit#258). The compose flow needs settings.get(openaiApiKey) to work, which is currently blocked by an OPEN Devvit platform bug.'
-      : 'Compiler offline. Try again in a minute.';
+    let userMsg: string;
+    if (msg === 'no_key_plugin_rpc') {
+      userMsg =
+        'Compiler offline: Devvit plugin RPC is unreachable (reddit/devvit#258, OPEN platform bug). settings.get(openaiApiKey) cannot return your key right now, so the compile cannot run. Once Reddit ships the platform fix, this same flow will produce the dry-run preview.';
+    } else if (msg === 'no_key') {
+      userMsg = 'No OpenAI API key configured. Run `npx devvit settings set openaiApiKey` and try again.';
+    } else {
+      userMsg = 'Compiler offline. Try again in a minute.';
+    }
     console.warn('[vibe-mod] submit: callOpenAI threw:', describeErr(err));
     return c.json<UiResponse>({ showToast: { text: userMsg, appearance: 'neutral' } });
   }
@@ -1033,12 +1041,35 @@ async function callOpenAI(
   clarificationAnswer?: string,
 ): Promise<{ json: unknown; tokensIn: number; tokensOut: number }> {
   // BYOK preference: sub-scope override key beats developer global key.
-  const subKey = (await settings.get('subredditOpenaiApiKey')) as string;
-  const globalKey = (await settings.get('openaiApiKey')) as string;
+  // settings.get currently throws \`undefined undefined: undefined\` whenever
+  // Devvit's plugin RPC sidecar is unreachable (reddit/devvit#258). Treat
+  // those throws as "key unavailable" so callers can surface the platform
+  // bug to the user instead of seeing the generic "Try again in a minute"
+  // toast. Distinct error code (\`no_key_plugin_rpc\`) lets the submit
+  // handler branch on the cause.
+  let subKey = '';
+  let globalKey = '';
+  try {
+    subKey = ((await settings.get('subredditOpenaiApiKey')) as string) ?? '';
+  } catch (err) {
+    console.warn('[vibe-mod] callOpenAI: settings.get(subredditOpenaiApiKey) threw:', describeErr(err));
+    throw new Error('no_key_plugin_rpc');
+  }
+  try {
+    globalKey = ((await settings.get('openaiApiKey')) as string) ?? '';
+  } catch (err) {
+    console.warn('[vibe-mod] callOpenAI: settings.get(openaiApiKey) threw:', describeErr(err));
+    throw new Error('no_key_plugin_rpc');
+  }
   const apiKey = (subKey?.trim() || globalKey || '').trim();
   if (!apiKey) throw new Error('no_key');
 
-  const model = ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini';
+  let model = 'gpt-5.4-mini';
+  try {
+    model = ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini';
+  } catch (err) {
+    console.warn('[vibe-mod] callOpenAI: settings.get(openaiModel) threw — using default:', describeErr(err));
+  }
 
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: VIBE_MOD_SYSTEM_PROMPT },
