@@ -10,3 +10,7 @@ claudedocs/**/*.htm
 # Markdown left to the author — Prettier bloats tables and rewraps prose.
 *.md
 **/*.md
+# Diagnostic artifacts from chrome-auth-test infrastructure (PR #39+).
+.venv-chrome-auth
+playwright/.auth
+*.d.ts
