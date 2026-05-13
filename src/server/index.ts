@@ -847,8 +847,19 @@ app.post('/internal/scheduler/shadow-promote-check', async (c) => {
 
 app.post('/internal/scheduler/rate-limit-circuit-breaker', async (c) => {
   await c.req.json<TaskRequest>();
+  const runtime = snapshotDevvitRuntime();
+  console.log('[vibe-mod] scheduler/rate-limit enter:', { runtime });
   const { id: subredditId, name: subredditName } = getCurrentSubredditRef();
-  const maxPerHour = ((await settings.get('maxActionsPerHour')) as number) ?? 100;
+  let maxPerHour = 100;
+  try {
+    const v = (await settings.get('maxActionsPerHour')) as number | undefined;
+    if (typeof v === 'number') maxPerHour = v;
+    console.log('[vibe-mod] scheduler/rate-limit: settings.get OK, maxPerHour=', maxPerHour);
+  } catch (err) {
+    console.warn('[vibe-mod] scheduler/rate-limit: settings.get threw:', describeErr(err));
+    // Don't 500 the scheduler — log and proceed with default. Otherwise Devvit
+    // retries and the same error spams the logs every 5 min.
+  }
   const oneHourAgo = Date.now() - 3_600_000;
 
   // FIND-04 fix: count audit entries in the last-hour SCORE window, not all-time.
