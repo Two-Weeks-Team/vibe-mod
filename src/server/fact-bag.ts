@@ -35,11 +35,57 @@ function upperCaseRatioOf(s: string): number {
   return letters.length === 0 ? 0 : (letters.match(/[A-Z]/g)?.length ?? 0) / letters.length;
 }
 
+// Fraction of characters outside the printable-ASCII range (0x20–0x7E). 0 for an
+// empty string. A crude "this isn't plain English / uses another script" signal —
+// useful for "send non-Latin-script posts to the mod queue"-style rules without
+// shipping a language-detection model into the runtime.
+function nonAsciiRatioOf(s: string): number {
+  if (s.length === 0) return 0;
+  let nonAscii = 0;
+  for (const ch of s) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp < 0x20 || cp > 0x7e) nonAscii++;
+  }
+  // Iterating with for..of counts code points, so divide by code-point length.
+  return nonAscii / [...s].length;
+}
+
+// Whitespace-delimited token count. 0 for an empty/blank string.
+function wordCountOf(s: string): number {
+  const trimmed = s.trim();
+  return trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
+}
+
+// All HTTP(S) URLs in a chunk of text. Shared by link-count and image-detect —
+// safe to reuse one /g regex because `String.prototype.match` with a global
+// regex neither reads nor mutates `lastIndex`.
+const URL_RE = /https?:\/\/[^\s)]+/gi;
+
+// Heuristic image detection: a URL that points at a common image host or ends in
+// an image extension. Best-effort — the Devvit trigger payload doesn't give us a
+// structured media field, so we read the body text + the post's own link.
+function looksLikeImageUrl(u: string): boolean {
+  let host = '';
+  let path = u;
+  try {
+    const parsed = new URL(u);
+    host = parsed.hostname.toLowerCase();
+    path = parsed.pathname.toLowerCase();
+  } catch {
+    path = u.toLowerCase();
+  }
+  if (host === 'i.redd.it' || host === 'i.imgur.com' || host === 'preview.redd.it') return true;
+  return /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/.test(path);
+}
+function imageUrlCountIn(text: string): number {
+  return (text.match(URL_RE) ?? []).filter(looksLikeImageUrl).length;
+}
+
 export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<FactBag> {
   const a = await getAuthorFacts(p.authorId, p.authorName);
-  const linkRegex = /https?:\/\/[^\s)]+/gi;
-  const links = p.body?.match(linkRegex) ?? [];
-  const upperCaseRatio = upperCaseRatioOf(p.body ?? '');
+  const body = p.body ?? '';
+  const links = body.match(URL_RE) ?? [];
+  const upperCaseRatio = upperCaseRatioOf(body);
   const titleUpperCaseRatio = upperCaseRatioOf(p.title ?? '');
   let urlDomain = '';
   try {
@@ -47,6 +93,7 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
   } catch {
     urlDomain = '';
   }
+  const imageCount = imageUrlCountIn(body) + (p.url && looksLikeImageUrl(p.url) ? 1 : 0);
 
   return {
     'author.accountAgeHours': a.accountAgeHours,
@@ -56,13 +103,17 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
     'author.hasVerifiedEmail': a.hasVerifiedEmail,
     'author.subJoinAgeHours': a.subJoinAgeHours,
 
-    'content.length': p.body?.length ?? 0,
+    'content.length': body.length,
+    'content.wordCount': wordCountOf(body),
     'content.linkCount': links.length,
-    'content.imageCount': 0, // v0.2: parse media field
+    'content.imageCount': imageCount,
     'content.upperCaseRatio': upperCaseRatio,
+    'content.nonAsciiRatio': nonAsciiRatioOf(body),
+    // A submission with no selftext body is a link / image / video post.
+    'content.isLinkPost': body.length === 0,
     // content.containsRegex actually carries the post body so op:matches works.
     // (audit FIND-08 fix — previously always '')
-    'content.containsRegex': p.body ?? '',
+    'content.containsRegex': body,
     'content.title.length': p.title?.length ?? 0,
     'content.title.contains': p.title ?? '',
     'content.title.upperCaseRatio': titleUpperCaseRatio,
@@ -79,8 +130,7 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
 
 export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Promise<FactBag> {
   const a = await getAuthorFacts(c.authorId, c.authorName);
-  const linkRegex = /https?:\/\/[^\s)]+/gi;
-  const links = c.body.match(linkRegex) ?? [];
+  const links = c.body.match(URL_RE) ?? [];
   const upperCaseRatio = upperCaseRatioOf(c.body);
 
   return {
@@ -92,9 +142,12 @@ export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Pr
     'author.subJoinAgeHours': a.subJoinAgeHours,
 
     'content.length': c.body.length,
+    'content.wordCount': wordCountOf(c.body),
     'content.linkCount': links.length,
-    'content.imageCount': 0,
+    'content.imageCount': imageUrlCountIn(c.body),
     'content.upperCaseRatio': upperCaseRatio,
+    'content.nonAsciiRatio': nonAsciiRatioOf(c.body),
+    'content.isLinkPost': false, // not applicable to comments
     // Comment body is the substrate for op:matches (audit FIND-08 fix)
     'content.containsRegex': c.body,
     'content.title.length': 0,
