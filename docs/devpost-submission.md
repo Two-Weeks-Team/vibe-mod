@@ -42,6 +42,36 @@ want a stochastic model making per-post calls on people's content. But there *is
 cleanly: as a **compiler**, translating one English sentence the moderator typed into a structured rule,
 once, at edit time — with the output validated, previewable, and reversible. That's vibe-mod.
 
+### "But doesn't Reddit's new Automations cover this?"
+
+Reddit shipped **Automations** in 2026 — UI-driven Posting/Commenting triggers, keyword / regex / URL /
+domain conditions, and a small set of actions (Display, Report, Block) gated by *User flair only*. It's
+real progress for the easy case, and the floor is now much higher than YAML AutoMod. But the ceiling is
+narrower than vibe-mod's, in three concrete ways:
+
+- **Facts we can rule on.** Automations expose user **flair** as the only author signal. vibe-mod's
+  closed fact-path enum gives a rule **eight** author signals — account age, post karma, comment karma,
+  per-sub karma, sub-join age, mod status, NSFW flag, premium status — plus six content signals
+  (length, all-caps ratio, non-ASCII ratio, URL count, NSFW/spoiler flags, crosspost flag) and three
+  report signals. "Brand new account posting a link" is one sentence in vibe-mod; it's not expressible
+  in Automations.
+- **Actions we can take.** Automations offer Display / Report / Block. vibe-mod's whitelist includes
+  *report*, *flair*, *lock*, *modqueue*, *remove* (default-allowed) plus *ban*, *mute*, *permaban*
+  behind an explicit checkbox at compile time — eight actions vs three. Removal, lockdown, and ban
+  are the moves most mod tickets actually ask for.
+- **Triggers.** Automations match on Posting and Commenting. vibe-mod also handles **report triggers**
+  (`onPostReport` / `onCommentReport`) so a rule like "auto-remove a comment after 3 reports from
+  distinct accounts" is one sentence.
+
+And on the safety story: Automations show a sandbox **preview** before activation; vibe-mod runs the
+real rule in **24-hour shadow mode** against real traffic (logs everything it would do, acts on
+nothing) with a **30-day one-click undo** on every live action. Both are valuable; they're not the
+same thing.
+
+If Automations is enough for the rule you want, use it — it's right there in the Reddit UI. The space
+vibe-mod is built for is "I know exactly what rule I want, the existing UI doesn't have these knobs,
+and I'd rather not learn AutoMod's YAML to express it."
+
 ## 2. What it does
 
 - **English → rule.** *Mod Tools → "vibe-mod: Compose rule"* → type the rule → **Compile + Preview**.
