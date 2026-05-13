@@ -7,9 +7,8 @@
 // HARD checks (exit 1 on failure): devvit.json is well-formed; every external
 // host the server code fetch()es is declared under permissions.http.domains;
 // node satisfies package.json engines.
-// SOFT checks (warn only): Devvit CLI logged in; .devvit-app-id present; the
-// other tooling files exist. Soft because they depend on the human having done
-// the wizard / `devvit login`.
+// SOFT checks (warn only): Devvit CLI logged in; the other tooling files exist.
+// Soft because they depend on the human having run `devvit login`.
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -36,7 +35,7 @@ console.log('devvit.json');
 let devvit: {
   $schema?: string;
   name?: string;
-  version?: string;
+  server?: { dir?: string; entry?: string };
   permissions?: { http?: { enable?: boolean; domains?: string[] }; reddit?: unknown; redis?: unknown };
   menu?: { items?: Array<{ endpoint?: string }> };
   forms?: Record<string, string>;
@@ -54,8 +53,17 @@ if (devvit) {
   else warn('$schema not set — add "https://developers.reddit.com/schema/config-file.v1.json" for editor validation');
   if (devvit.name) ok(`name: ${devvit.name}`);
   else fail('name missing');
-  if (devvit.version) ok(`version: ${devvit.version}`);
-  else fail('version missing');
+  // NB: the official devvit.json schema does NOT allow a top-level `version`
+  // (versioning is managed by `devvit upload --bump` / package.json) — having
+  // one makes `devvit upload` fail validation, so flag it.
+  if ((devvit as Record<string, unknown>).version !== undefined)
+    fail(
+      'remove the top-level "version" field from devvit.json — not allowed by the schema (managed by `devvit upload`)',
+    );
+  if (devvit.server?.entry && devvit.server.entry.includes('/'))
+    fail(
+      `server.entry must be a bare filename within server.dir (default dist/server), not a path — got "${devvit.server.entry}"`,
+    );
   if (devvit.permissions) ok('permissions block present');
   else fail('permissions block missing');
 }
@@ -146,10 +154,6 @@ try {
 } catch {
   warn('not logged in — run `npx devvit login` before `npm run dev` / `upload` / `publish`');
 }
-if (exists('.devvit-app-id')) ok('.devvit-app-id present');
-else
-  warn('.devvit-app-id not found — run the Devvit "Mod Tool" wizard at https://developers.reddit.com/new (creates it)');
-
 // ── tooling files (soft) ──────────────────────────────────────────────────────
 console.log('\nTooling');
 for (const f of [
