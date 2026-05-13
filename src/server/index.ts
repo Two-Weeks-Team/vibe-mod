@@ -1320,19 +1320,18 @@ async function callOpenAI(
   // 7-bit ASCII, still strictly valid JSON, and any compliant parser
   // (including OpenAI's) decodes it back to the same Unicode characters.
   const rawBody = JSON.stringify({
-    model, // gpt-5.4-mini (default) / gpt-5.4-nano / gpt-5.4 — see devvit.json openaiModel
+    model, // gpt-5.4-mini (default) / gpt-5.4-nano / gpt-5.4 -- see devvit.json openaiModel
     response_format: { type: 'json_object' },
     messages,
-    // Tuned for what this call is: a mechanical NL → strict-JSON translation.
-    //   reasoning_effort: 'none'  — no hidden reasoning needed; keeps it fast and stops the
-    //                               token budget being eaten by reasoning (gpt-5.4 family value;
-    //                               older models call this 'minimal'). Measured ~1.1-1.4s.
-    //   verbosity: 'low'          — terse JSON, no commentary.
-    //   max_completion_tokens     — a compiled rule + a clarification fit well under 600.
-    //   (no `temperature` — the gpt-5.x family only accepts the default; max_tokens isn't
-    //    supported on these models, use max_completion_tokens.)
-    reasoning_effort: 'none',
-    verbosity: 'low',
+    // reasoning_effort + verbosity dropped 2026-05-14: PR #32 (single message)
+    // and PR #33 (source ASCII) both still hit HTTP 400 from Devvit transit.
+    // Probe v3 isolated (d)/(e) individually but never tested all-3 features
+    // on a large body simultaneously. Removing them keeps the body on the
+    // narrowest known-good shape: probe(f) = 5610 B single user message,
+    // no extra features, returned 200 in production 3 times. response_format
+    // stays (model output JSON contract); max_completion_tokens stays (cost cap).
+    //   (no `temperature` -- gpt-5.x family only accepts the default; max_tokens
+    //    isn't supported on these models, use max_completion_tokens.)
     max_completion_tokens: 600,
   });
   // ASCII-safe rewrite: any non-ASCII char (>= 0x80) → `\uXXXX` literal in
