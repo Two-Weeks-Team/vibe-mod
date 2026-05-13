@@ -92,8 +92,6 @@
     "dashboardForm": "/internal/form/dashboard-action"
   },
   "triggers": {
-    "onAppInstall": "/internal/trigger/on-app-install",
-    "onAppUpgrade": "/internal/trigger/on-app-upgrade",
     "onPostSubmit": "/internal/trigger/on-post-submit",
     "onCommentSubmit": "/internal/trigger/on-comment-submit",
     "onPostReport": "/internal/trigger/on-post-report",
