@@ -167,6 +167,10 @@ export const Rule = z
     enabled: z.boolean().default(true),
     shadow: z.boolean().default(true), // default ON, mod must explicitly promote
     createdAt: z.number().int().nonnegative(),
+    // Stamped when the rule is first activated (draft → active). The shadow-mode
+    // window is measured from this, not createdAt, so a draft that sits unactivated
+    // for longer than shadowDurationHours doesn't go live the instant it's promoted.
+    activatedAt: z.number().int().nonnegative().optional(),
     createdBy: z.string().regex(/^t2_[a-z0-9]+$/),
   })
   .strict();

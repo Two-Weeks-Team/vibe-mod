@@ -21,7 +21,7 @@ export interface FakeRedis {
   hashes: Map<string, Record<string, string>>;
   zsets: Map<string, Array<{ member: string; score: number }>>;
   get: (k: string) => Promise<string | undefined>;
-  set: (k: string, v: string) => Promise<void>;
+  set: (k: string, v: string, opts?: { nx?: boolean; xx?: boolean; expiration?: Date }) => Promise<void>;
   del: (k: string) => Promise<void>;
   expire: (k: string, ttl: number) => Promise<void>;
   hSet: (k: string, fields: Record<string, string>) => Promise<void>;
@@ -58,7 +58,14 @@ export function makeFakeRedis(): FakeRedis {
     hashes,
     zsets,
     get: async (k: string) => store.get(k),
-    set: async (k: string, v: string) => void store.set(k, v),
+    // Honour SET NX/XX so the production `acquireOnce()` helper (idempotency,
+    // per-author rate limit) behaves the same here. (TTL is not modelled — the
+    // fake never expires keys; tests that care about expiry use @devvit/test.)
+    set: async (k: string, v: string, opts?: { nx?: boolean; xx?: boolean }) => {
+      if (opts?.nx && store.has(k)) return;
+      if (opts?.xx && !store.has(k)) return;
+      store.set(k, v);
+    },
     del: async (k: string) => {
       store.delete(k);
       hashes.delete(k);

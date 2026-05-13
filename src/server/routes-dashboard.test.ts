@@ -130,14 +130,19 @@ describe('POST /internal/form/dashboard-action', () => {
     expect(body.showToast).toBe('No draft to activate.');
   });
 
-  it('promotes the draft bundle to active', async () => {
+  it('promotes the draft bundle to active and stamps activatedAt on each rule', async () => {
     asMod();
-    const draft = JSON.stringify(seedStarterRules(123));
-    await fakeRedis.set('testsub:rules:draft', draft);
+    const seeded = seedStarterRules(123);
+    await fakeRedis.set('testsub:rules:draft', JSON.stringify(seeded));
 
     const body = await (await call('/internal/form/dashboard-action', { activate: true })).json();
     expect(body.showToast.appearance).toBe('success');
     expect(body.showToast.text).toMatch(/Shadow mode is ON/i);
-    expect(await fakeRedis.get('testsub:rules:active')).toBe(draft);
+
+    const active = JSON.parse((await fakeRedis.get('testsub:rules:active')) ?? '{}') as {
+      rules: Array<{ id: string; activatedAt?: number }>;
+    };
+    expect(active.rules.map((r) => r.id)).toEqual(seeded.rules.map((r) => r.id));
+    for (const r of active.rules) expect(typeof r.activatedAt).toBe('number');
   });
 });
