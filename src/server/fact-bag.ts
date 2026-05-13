@@ -14,6 +14,10 @@ interface PostInput {
   title?: string;
   body?: string;
   url?: string;
+  nsfw?: boolean;
+  isVideo?: boolean;
+  isSpoiler?: boolean;
+  crosspostParentId?: string; // set when the post is a crosspost
   sub?: { weeklyActiveUsers?: number; over18?: boolean };
   authorId: string;
   authorName: string;
@@ -98,6 +102,8 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
   return {
     'author.accountAgeHours': a.accountAgeHours,
     'author.totalKarma': a.totalKarma,
+    'author.postKarma': a.postKarma,
+    'author.commentKarma': a.commentKarma,
     'author.subKarma': a.subKarma,
     'author.isModerator': a.isModerator,
     'author.hasVerifiedEmail': a.hasVerifiedEmail,
@@ -111,6 +117,10 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
     'content.nonAsciiRatio': nonAsciiRatioOf(body),
     // A submission with no selftext body is a link / image / video post.
     'content.isLinkPost': body.length === 0,
+    'content.over18': p.nsfw ?? false,
+    'content.isVideo': p.isVideo ?? false,
+    'content.isSpoiler': p.isSpoiler ?? false,
+    'content.isCrosspost': !!p.crosspostParentId,
     // content.containsRegex actually carries the post body so op:matches works.
     // (audit FIND-08 fix — previously always '')
     'content.containsRegex': body,
@@ -136,6 +146,8 @@ export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Pr
   return {
     'author.accountAgeHours': a.accountAgeHours,
     'author.totalKarma': a.totalKarma,
+    'author.postKarma': a.postKarma,
+    'author.commentKarma': a.commentKarma,
     'author.subKarma': a.subKarma,
     'author.isModerator': a.isModerator,
     'author.hasVerifiedEmail': a.hasVerifiedEmail,
@@ -147,7 +159,12 @@ export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Pr
     'content.imageCount': imageUrlCountIn(c.body),
     'content.upperCaseRatio': upperCaseRatio,
     'content.nonAsciiRatio': nonAsciiRatioOf(c.body),
-    'content.isLinkPost': false, // not applicable to comments
+    // These are post-only concepts — always false/0 for comments.
+    'content.isLinkPost': false,
+    'content.over18': false,
+    'content.isVideo': false,
+    'content.isSpoiler': false,
+    'content.isCrosspost': false,
     // Comment body is the substrate for op:matches (audit FIND-08 fix)
     'content.containsRegex': c.body,
     'content.title.length': 0,
@@ -167,6 +184,8 @@ export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Pr
 interface AuthorFacts {
   accountAgeHours: number;
   totalKarma: number;
+  postKarma: number;
+  commentKarma: number;
   subKarma: number;
   isModerator: boolean;
   hasVerifiedEmail: boolean;
@@ -183,6 +202,8 @@ const ESTABLISHED = 1_000_000; // ≈114 years / "very high karma"
 const SAFE_AUTHOR_DEFAULTS: AuthorFacts = {
   accountAgeHours: ESTABLISHED,
   totalKarma: ESTABLISHED,
+  postKarma: ESTABLISHED,
+  commentKarma: ESTABLISHED,
   subKarma: ESTABLISHED,
   isModerator: false,
   hasVerifiedEmail: false,
@@ -246,9 +267,13 @@ async function getAuthorFacts(authorId: string, authorName: string): Promise<Aut
     /* keep default false */
   }
 
+  const postKarma = user.linkKarma ?? 0;
+  const commentKarma = user.commentKarma ?? 0;
   const facts: AuthorFacts = {
     accountAgeHours,
-    totalKarma: (user.linkKarma ?? 0) + (user.commentKarma ?? 0),
+    totalKarma: postKarma + commentKarma,
+    postKarma,
+    commentKarma,
     subKarma,
     isModerator,
     hasVerifiedEmail: false, // Devvit API does not expose this; document as always-false

@@ -30,6 +30,8 @@ export const FactPaths = [
   // Author (account-level)
   'author.accountAgeHours',
   'author.totalKarma',
+  'author.postKarma', // link/post karma only
+  'author.commentKarma', // comment karma only
   'author.subKarma',
   'author.isModerator',
   'author.hasVerifiedEmail',
@@ -43,6 +45,10 @@ export const FactPaths = [
   'content.upperCaseRatio', // body's A–Z uppercase ratio (0 for link posts / empty bodies)
   'content.nonAsciiRatio', // fraction of non-ASCII characters in the body (0 for empty body) — a crude "non-English / different script" signal
   'content.isLinkPost', // true for a link/image/video submission (no selftext body); always false for comments
+  'content.over18', // post flagged NSFW (the post's own flag, not the subreddit's); always false for comments
+  'content.isVideo', // post is a video submission; always false for comments
+  'content.isSpoiler', // post flagged as a spoiler; always false for comments
+  'content.isCrosspost', // post is a crosspost of another post; always false for comments
   'content.containsRegex', // requires .params.regex
   'content.title.length',
   'content.title.contains', // requires .params.needle
