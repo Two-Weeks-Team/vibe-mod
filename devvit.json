@@ -4,7 +4,7 @@
   "server": { "dir": "dist/server", "entry": "index.cjs" },
   "marketingAssets": { "icon": "assets/icon.png" },
   "permissions": {
-    "reddit": { "enable": true, "scope": "moderator" },
+    "reddit": { "enable": true },
     "redis": true,
     "http": { "enable": true, "domains": ["api.openai.com"] }
   },
