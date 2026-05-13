@@ -24,7 +24,11 @@ export default defineConfig({
     emptyOutDir: false,
     target: 'node22',
     sourcemap: true,
-    minify: 'esbuild',
+    // vite 8 migration: 'esbuild' is no longer bundled with vite — it must be
+    // installed separately OR you can use vite 8's default oxc transformer.
+    // `true` selects the default minifier (oxc in vite 8), which is fine for
+    // our CJS server bundle (we don't need esbuild-specific behaviour).
+    minify: true,
     outDir: 'dist/server',
     ssr: 'src/server/index.ts',
     rollupOptions: {
