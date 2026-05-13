@@ -125,7 +125,10 @@ describe('POST /internal/form/compose-rule-submit', () => {
     const body = await (
       await call('/internal/form/compose-rule-submit', { rule: 'flag low karma', allowGuarded: false })
     ).json();
-    expect(body.showToast.text).toContain('Compiler offline');
+    // c9bc895 added status-aware toasts. 5xx → "OpenAI is having a server
+    // problem (HTTP 5xx). Try again in a minute." Use a permissive match so
+    // a future copy-edit doesn't break the test.
+    expect(body.showToast.text).toMatch(/(Compiler offline|OpenAI is having a server problem)/);
   });
 
   it('re-opens the form with a clarification field when the LLM asks a question', async () => {
