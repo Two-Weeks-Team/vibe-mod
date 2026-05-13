@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import app from './index';
-import { fakeRedis, fakeReddit, fakeSettings } from '../../test/setup';
+import { fakeRedis, fakeReddit, fakeSettings, fakeScheduler } from '../../test/setup';
 import { Rule, RuleBundle, type RuleType } from '../shared/rule-schema';
 import { seedStarterRules } from '../shared/starter-rules';
 
@@ -144,8 +144,31 @@ describe('POST /internal/trigger/on-comment-submit', () => {
 });
 
 describe('POST /internal/trigger/on-app-install', () => {
-  it('seeds an empty active bundle and 5 starter rules as a draft', async () => {
-    await call('/internal/trigger/on-app-install', { type: 'AppInstall' });
+  // The handler defers seeding to a one-shot scheduler job (`seed-on-install`)
+  // and returns immediately — past inline-seeding installs were rolled back as
+  // "context canceled" because Devvit's trigger deadline raced the cold-start /
+  // Redis writes. Seeding semantics live in the scheduler tests below.
+  it('returns ok and schedules the seed-on-install job (no inline writes)', async () => {
+    const res = await call('/internal/trigger/on-app-install', { type: 'AppInstall' });
+    expect(await res.json()).toEqual({ status: 'ok' });
+    expect(fakeScheduler.runJob).toHaveBeenCalledWith(expect.objectContaining({ name: 'seed-on-install' }));
+    // Critically: the install handler must NOT touch Redis itself (so even if
+    // Redis is slow / unavailable, the install completes and Devvit doesn't
+    // mark it failed).
+    expect(await fakeRedis.get('testsub:rules:active')).toBeUndefined();
+    expect(await fakeRedis.get('testsub:rules:draft')).toBeUndefined();
+  });
+
+  it('returns ok even if scheduling the seed job throws (install must not fail)', async () => {
+    fakeScheduler.runJob.mockRejectedValueOnce(new Error('scheduler down'));
+    const res = await call('/internal/trigger/on-app-install', { type: 'AppInstall' });
+    expect(await res.json()).toEqual({ status: 'ok' });
+  });
+});
+
+describe('POST /internal/scheduler/seed-on-install', () => {
+  it('seeds an empty active bundle and 5 starter draft rules', async () => {
+    await call('/internal/scheduler/seed-on-install', {});
     const active = JSON.parse((await fakeRedis.get('testsub:rules:active'))!);
     const draft = JSON.parse((await fakeRedis.get('testsub:rules:draft'))!);
     expect(active.rules).toHaveLength(0);
@@ -153,11 +176,38 @@ describe('POST /internal/trigger/on-app-install', () => {
     expect(draft.rules.every((r: { shadow: boolean }) => r.shadow === true)).toBe(true);
   });
 
-  it('does not clobber an existing draft on re-install', async () => {
+  it('does not clobber an existing draft on re-run', async () => {
     const existing = JSON.stringify(seedStarterRules(999));
     await fakeRedis.set('testsub:rules:draft', existing);
-    await call('/internal/trigger/on-app-install', { type: 'AppInstall' });
+    await call('/internal/scheduler/seed-on-install', {});
     expect(await fakeRedis.get('testsub:rules:draft')).toBe(existing);
+  });
+
+  it('does not clobber an existing active bundle on re-run', async () => {
+    const existing = JSON.stringify(seedStarterRules(999));
+    await fakeRedis.set('testsub:rules:active', existing);
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(await fakeRedis.get('testsub:rules:active')).toBe(existing);
+  });
+
+  it('returns ok even when seeding throws (non-fatal)', async () => {
+    const origSet = fakeRedis.set;
+    // sabotage the next Redis write
+    let called = 0;
+    fakeRedis.set = (async (k: string, v: string) => {
+      if (k.includes('rules:active')) {
+        called++;
+        throw new Error('redis quota exceeded');
+      }
+      return origSet(k, v);
+    }) as typeof fakeRedis.set;
+    try {
+      const res = await call('/internal/scheduler/seed-on-install', {});
+      expect(await res.json()).toEqual({ status: 'ok' });
+      expect(called).toBeGreaterThan(0);
+    } finally {
+      fakeRedis.set = origSet;
+    }
   });
 });
 
