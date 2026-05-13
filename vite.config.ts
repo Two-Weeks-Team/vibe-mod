@@ -32,8 +32,11 @@ export default defineConfig({
       output: {
         format: 'cjs',
         entryFileNames: 'index.cjs',
-        inlineDynamicImports: true,
       },
     },
+    // vite 8 migration: `inlineDynamicImports: true` is deprecated; use the
+    // top-level `codeSplitting: false` instead. This still inlines every
+    // dynamic import into the single index.cjs bundle Devvit expects.
+    codeSplitting: false,
   },
 });
