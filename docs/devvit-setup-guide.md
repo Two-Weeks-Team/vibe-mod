@@ -193,15 +193,13 @@ npm run dev          # = `devvit playtest`  →  Ctrl+C to end
 
 What `devvit playtest` does: installs the app on your test subreddit, re-installs a new version every
 time you save a code change, and streams logs to the terminal. It picks the subreddit from, in order:
-`DEVVIT_SUBREDDIT` env var → `dev.subreddit` in `devvit.json` (currently `"vibemod_playtest"`) → the
+`DEVVIT_SUBREDDIT` env var → `dev.subreddit` in `devvit.json` (currently `"SocialSeeding"`) → the
 playtest sub stored for your app → otherwise it auto-creates one.
 
-⚠️ `devvit.json` currently has `"dev": { "subreddit": "vibemod_playtest" }`. If you don't actually
-moderate a sub by that name, either:
-- create `r/vibemod_playtest` (private, you as mod, keep < 200 subscribers), **or**
-- change that value to your test sub's name, **or**
-- delete the `dev.subreddit` field and let `devvit upload`/`playtest` auto-create one (recommended if
-  you don't care about the name).
+⚠️ `devvit.json` currently has `"dev": { "subreddit": "SocialSeeding" }` — `r/SocialSeeding` is the
+team's demo community. Keep it under 200 subscribers (a hackathon rule for the test/demo sub). If you're
+working from a different account, either change that value to a test sub you moderate, or delete the
+`dev.subreddit` field and let `devvit upload`/`playtest` auto-create one.
 
 Ending the playtest (Ctrl+C) does **not** uninstall — the last playtested version stays installed on
 the test sub. To revert: `devvit install <test-sub> [@version]`.

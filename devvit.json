@@ -123,6 +123,6 @@
     "build": "vite build"
   },
   "dev": {
-    "subreddit": "vibemod_playtest"
+    "subreddit": "SocialSeeding"
   }
 }
