@@ -476,7 +476,14 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
 
   let llmModel = 'gpt-5.4-mini';
   try {
-    llmModel = ((await settings.get('openaiModel')) as string) || 'gpt-5.4-mini';
+    // Same SELECTION-array unwrap as callOpenAI (PR #39). The submit handler
+    // stores `llmModel` into the draft bundle as metadata; without this
+    // unwrap, the draft.llmModel field would hold `["gpt-5.4-mini"]` instead
+    // of `"gpt-5.4-mini"`, breaking later parses of the bundle.
+    const rawModel = await settings.get('openaiModel');
+    let unwrapped: unknown = rawModel;
+    if (Array.isArray(rawModel) && rawModel.length > 0) unwrapped = rawModel[0];
+    if (typeof unwrapped === 'string' && unwrapped.trim()) llmModel = unwrapped.trim();
   } catch (err) {
     console.warn('[vibe-mod] submit: settings.get(openaiModel) threw — using default:', describeErr(err));
   }
