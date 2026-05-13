@@ -108,6 +108,9 @@
       "dry-run-replay": {
         "endpoint": "/internal/scheduler/dry-run-replay"
       },
+      "seed-on-install": {
+        "endpoint": "/internal/scheduler/seed-on-install"
+      },
       "shadow-promote-check": {
         "endpoint": "/internal/scheduler/shadow-promote-check",
         "cron": "*/15 * * * *"

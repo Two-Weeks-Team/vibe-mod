@@ -569,30 +569,49 @@ app.post('/internal/trigger/on-comment-submit', async (c) => {
 });
 
 app.post('/internal/trigger/on-app-install', async (c) => {
-  await c.req.json<OnAppInstallRequest>();
-  const subredditName = getCurrentSubredditName();
-
-  // Empty ACTIVE bundle — nothing fires until the mod promotes the draft.
-  const emptyActive: RuleBundleType = {
-    schemaVersion: '1.0.0',
-    bundleVersion: 1,
-    compiledAt: Date.now(),
-    llmModel: 'seed',
-    llmTokensIn: 0,
-    llmTokensOut: 0,
-    rules: [],
-  };
-  await redis.set(`${subredditName}:rules:active`, JSON.stringify(emptyActive));
-
-  // Seed 5 conservative starter rules as a DRAFT (shadow: true, SAFE actions
-  // only). They show up in the Dashboard as "Draft rules: 5"; the mod reviews
-  // and activates when ready — same Activate gate as any compiled rule.
-  // Don't clobber an existing draft on re-install.
-  const draftKey = `${subredditName}:rules:draft`;
-  if (!(await redis.get(draftKey))) {
-    await redis.set(draftKey, JSON.stringify(seedStarterRules(Date.now())));
+  // Trigger handlers are bound by Devvit's RPC deadline — if our handler throws
+  // OR runs slow on a cold start, the install is rolled back with an opaque
+  // "context canceled" error and no logs (the install never completes, so log
+  // capture never starts). Defend in two layers:
+  //   1) try/catch + always-200 — never let an exception kill the install.
+  //   2) defer the seed work to a one-shot scheduler job — the install handler
+  //      returns immediately, the seeding runs out-of-band and is non-fatal.
+  await c.req.json<OnAppInstallRequest>().catch(() => null);
+  try {
+    await scheduler.runJob({ name: 'seed-on-install', runAt: new Date() });
+  } catch (err) {
+    console.error('[vibe-mod] failed to schedule seed-on-install (non-fatal):', err);
   }
   return c.json<TriggerResponse>({ status: 'ok' });
+});
+
+// Seeds 5 starter draft rules + an empty active bundle on first install.
+// Idempotent: if a draft / active already exists we don't clobber it.
+app.post('/internal/scheduler/seed-on-install', async (c) => {
+  await c.req.json<TaskRequest>().catch(() => null);
+  try {
+    const subredditName = getCurrentSubredditName();
+    const activeKey = `${subredditName}:rules:active`;
+    if (!(await redis.get(activeKey))) {
+      const emptyActive: RuleBundleType = {
+        schemaVersion: '1.0.0',
+        bundleVersion: 1,
+        compiledAt: Date.now(),
+        llmModel: 'seed',
+        llmTokensIn: 0,
+        llmTokensOut: 0,
+        rules: [],
+      };
+      await redis.set(activeKey, JSON.stringify(emptyActive));
+    }
+    const draftKey = `${subredditName}:rules:draft`;
+    if (!(await redis.get(draftKey))) {
+      await redis.set(draftKey, JSON.stringify(seedStarterRules(Date.now())));
+    }
+  } catch (err) {
+    console.error('[vibe-mod] seed-on-install failed (non-fatal — mod can still compose):', err);
+  }
+  return c.json<TaskResponse>({ status: 'ok' });
 });
 
 app.post('/internal/trigger/on-app-upgrade', async (c) => {
