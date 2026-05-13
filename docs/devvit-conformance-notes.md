@@ -11,7 +11,7 @@ fixed. Anything still open is at the bottom.
 - **`devvit.json` was missing the required `server` block.** A Devvit Web app must declare `post` and/or `server`; vibe-mod is server-only → it needs `"server": { "entry": "<cjs bundle path>" }`. Added `"server": { "entry": "dist/server/index.cjs" }`.
 - **No build step produced a CommonJS server bundle.** `tsconfig` had `noEmit: true` and ESM output; the Devvit Web runtime requires **CJS** server output. Added `vite.config.ts` (SSR build, `format: 'cjs'`, `entryFileNames: 'index.cjs'`, `target: 'node22'`, `ssr.noExternal: true` so `@devvit/web`/`hono`/`zod` are bundled in, only Node builtins external, `minify: 'esbuild'` → ~2.1 MB). Added `vite` as a devDep.
 - **`devvit.json` had no `scripts`.** `devvit playtest` runs `scripts.dev`, `devvit upload` runs `scripts.build`. Added `"scripts": { "dev": "vite build --watch", "build": "vite build" }`. `package.json`'s `build` is now `tsc --noEmit && vite build`.
-- Added `"dev": { "subreddit": "vibe-mod-playtest" }` so `devvit playtest` doesn't need a generated sub (overridable via `DEVVIT_SUBREDDIT`).
+- Added `"dev": { "subreddit": "vibemod_playtest" }` so `devvit playtest` doesn't need a generated sub (overridable via `DEVVIT_SUBREDDIT`).
 - `dist/` is git-ignored (build artifact).
 
 ### 2. Dependency / import hygiene (the canonical Devvit Web shape)

@@ -1,8 +1,11 @@
 // vite.config.ts — builds the Devvit Web *server* bundle.
 // vibe-mod is server-only (no webview/post), so there's just one build target:
 // the Node server endpoints in src/server/index.ts, compiled to a single
-// CommonJS file at dist/server/index.cjs (the path `devvit.json`'s `server.entry`
-// points at). The Devvit Web runtime requires CJS — ESM server output is not
+// CommonJS file at dist/server/index.cjs. devvit.json declares this as
+// `server: { dir: "dist/server", entry: "index.cjs" }` — `entry` is the filename
+// *within* `dir`, not a path from the project root, so it must stay in sync with
+// `outDir` + `entryFileNames` below. The Devvit Web runtime requires CJS — ESM
+// server output is not
 // supported. Run via `vite build` (= devvit.json `scripts.build`, used by
 // `devvit upload`) or `vite build --watch` (= `scripts.dev`, used by `devvit playtest`).
 //
