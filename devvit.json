@@ -1,8 +1,7 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
   "name": "vibe-mod",
-  "version": "0.1.0",
-  "server": { "entry": "dist/server/index.cjs" },
+  "server": { "dir": "dist/server", "entry": "index.cjs" },
   "marketingAssets": { "icon": "assets/icon.png" },
   "permissions": {
     "reddit": { "enable": true, "scope": "moderator" },
@@ -15,8 +14,7 @@
         "type": "string",
         "label": "Developer OpenAI API Key (sk-…)",
         "isSecret": true,
-        "defaultValue": "",
-        "helpText": "Devvit constraint: secrets must be global. This key is shared across all subreddit installs of vibe-mod (per-install BYOK override available via subredditOpenaiApiKey below). Daily quota per sub is enforced to bound cost."
+        "helpText": "Devvit constraint: secrets must be global. This key is shared across all subreddit installs of vibe-mod (per-install BYOK override available via subredditOpenaiApiKey below). Daily quota per sub is enforced to bound cost. Set it after the first upload: `npx devvit settings set openaiApiKey`."
       },
       "openaiModel": {
         "type": "select",
@@ -125,6 +123,6 @@
     "build": "vite build"
   },
   "dev": {
-    "subreddit": "vibe-mod-playtest"
+    "subreddit": "vibemod_playtest"
   }
 }

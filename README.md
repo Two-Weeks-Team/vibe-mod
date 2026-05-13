@@ -12,10 +12,7 @@
 > and keeps **30-day rollback** on every action it ever takes. The LLM is used **only at rule-edit
 > time** — zero AI calls per post or comment, and the LLM never sees Reddit content.
 
-<!-- TODO before submission: add 3+ screenshots of the live app (compose form, dry-run preview, dashboard/audit log). -->
-<!-- ![Compose a rule](docs/img/compose.png) -->
-<!-- ![Dry-run preview](docs/img/dry-run.png) -->
-<!-- ![Rules + audit log](docs/img/dashboard.png) -->
+_Screenshots (compose form · dry-run preview · audit log) are added once the app is running in a test community — see [`docs/devvit-setup-guide.md`](./docs/devvit-setup-guide.md)._
 
 ---
 
