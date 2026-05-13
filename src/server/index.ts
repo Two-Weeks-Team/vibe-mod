@@ -372,6 +372,17 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
         'Devvit settings/plugin RPC is unavailable in this runtime. Could not read openaiApiKey, so the compile cannot run. (Possibly related to reddit/devvit#258 — same gRPC layer.) The same flow will produce the dry-run preview once the platform recovers.';
     } else if (msg === 'no_key') {
       userMsg = 'No OpenAI API key configured. Run `npx devvit settings set openaiApiKey` and try again.';
+    } else if (msg === 'openai_400') {
+      userMsg =
+        'OpenAI rejected the request (HTTP 400). Likely an invalid model name or unsupported parameter — check `npx devvit logs r/<sub>` for the full response body. The smoketest models (gpt-5.4-mini / gpt-5.4-nano / gpt-5.4) may need updating if OpenAI deprecated one of them.';
+    } else if (msg === 'openai_401' || msg === 'openai_403') {
+      userMsg =
+        'OpenAI rejected the request (HTTP 401/403). The configured key is missing, invalid, or revoked. Run `npx devvit settings set openaiApiKey` with a fresh key.';
+    } else if (msg === 'openai_429') {
+      userMsg =
+        'OpenAI rate-limited the request (HTTP 429). Wait a moment and try again, or attach a BYOK key in settings.';
+    } else if (msg.startsWith('openai_5')) {
+      userMsg = 'OpenAI is having a server problem (HTTP 5xx). Try again in a minute.';
     } else {
       userMsg = 'Compiler offline. Try again in a minute.';
     }
@@ -1286,7 +1297,22 @@ async function callOpenAI(
     }),
   });
 
-  if (!resp.ok) throw new Error(`openai_${resp.status}`);
+  if (!resp.ok) {
+    // Read the body so we can see *why* OpenAI rejected the request. The body
+    // never leaves server logs — the user-facing toast is just the status
+    // code. Trim to 1 KB to avoid logging unbounded payloads. Common 400
+    // causes: invalid model name (e.g. retired), unsupported reasoning_effort
+    // / verbosity parameter, response_format mismatch. Diagnosable from
+    // `error.message` in OpenAI's response body.
+    let errBody = '';
+    try {
+      errBody = (await resp.text()).slice(0, 1000);
+    } catch {
+      /* nothing */
+    }
+    console.warn(`[vibe-mod] callOpenAI: HTTP ${resp.status} ${resp.statusText} body:`, errBody);
+    throw new Error(`openai_${resp.status}`);
+  }
   const data = (await resp.json()) as {
     choices: Array<{ message: { content: string } }>;
     usage?: { prompt_tokens?: number; completion_tokens?: number };
