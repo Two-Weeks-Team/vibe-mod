@@ -90,11 +90,22 @@ describe('executeActions — short-circuit paths', () => {
 });
 
 describe('executeActions — guarded verbs', () => {
-  it('skips ban/mute/permaban silently when not in shadow mode (v0.1 never auto-fires)', async () => {
+  // A guarded action only reaches a stored rule if the mod ticked "Allow ban/mute"
+  // at compile time, so the executor runs it like any other action (after the 24h
+  // shadow window + circuit breaker), with a 30-day rollback.
+  it('logs (does not act) a guarded action while the rule is in shadow mode', async () => {
+    const r = rule({ then: [{ action: 'ban', params: { reason: 'spam' } }] });
+    const audits = await executeActions(ctx({ rule: r, isShadowMode: true }));
+    expect(audits[0].outcome).toBe('shadow');
+    expect(fakeReddit.banUser).not.toHaveBeenCalled();
+  });
+
+  it('executes a guarded action once the rule is live (mod opted in at compile time)', async () => {
     const r = rule({ then: [{ action: 'ban', params: { reason: 'spam' } }] });
     const audits = await executeActions(ctx({ rule: r }));
-    expect(audits[0].outcome).toBe('guarded_skip');
-    expect(fakeReddit.banUser).not.toHaveBeenCalled();
+    expect(audits[0].outcome).toBe('applied');
+    expect(fakeReddit.banUser).toHaveBeenCalledWith(expect.objectContaining({ username: 'spammer', reason: 'spam' }));
+    expect(await fakeRedis.get(`testsub:rollback:${audits[0].actionId}`)).toBeTruthy();
   });
 });
 

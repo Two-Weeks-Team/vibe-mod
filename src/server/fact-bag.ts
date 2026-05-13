@@ -173,13 +173,20 @@ interface AuthorFacts {
   subJoinAgeHours: number;
 }
 
+// When the Reddit author lookup fails (rate limit / outage), fail SAFE: the
+// author looks long-established and high-karma, so common restrictive rules
+// ("new account < N hours", "karma < N") do NOT fire on a flood of legitimate
+// posts. Every action in the whitelist is restrictive, so "looks established"
+// is the conservative default. (Was all-zeros, which made every author look like
+// a brand-new throwaway — gap-analysis.)
+const ESTABLISHED = 1_000_000; // ≈114 years / "very high karma"
 const SAFE_AUTHOR_DEFAULTS: AuthorFacts = {
-  accountAgeHours: 0,
-  totalKarma: 0,
-  subKarma: 0,
+  accountAgeHours: ESTABLISHED,
+  totalKarma: ESTABLISHED,
+  subKarma: ESTABLISHED,
   isModerator: false,
   hasVerifiedEmail: false,
-  subJoinAgeHours: 0,
+  subJoinAgeHours: ESTABLISHED,
 };
 
 async function getAuthorFacts(authorId: string, authorName: string): Promise<AuthorFacts> {
