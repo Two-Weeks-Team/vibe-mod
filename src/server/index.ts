@@ -1293,21 +1293,27 @@ async function callOpenAI(
   // model still learns the rule-compilation pattern. Length caps preserved
   // (rule ≤ 1000, clarification ≤ 500) for prompt-injection surface control.
   const clarif = clarificationAnswer?.trim().slice(0, 500);
+  // Flatten to a single line of ASCII without `\n` so the wire body has zero
+  // newline-escape sequences. PR #34 dropped reasoning_effort + verbosity but
+  // production v0.0.35 still hit 400; the only remaining variable separating
+  // our body from probe(f) (the 6 KB single-user 200 OK shape) is escape-char
+  // density (`\n` and `\"`). Collapsing whitespace eliminates the `\n` family
+  // entirely. The few-shot OUTPUT examples still produce `\"` from the outer
+  // JSON.stringify wrapping our content string -- if 400 persists after this,
+  // we'll need to express few-shot output without quoted keys.
+  const collapse = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const exampleLine = (ex: (typeof FEW_SHOT_EXAMPLES)[number], i: number) =>
+    `EXAMPLE ${i + 1} INPUT: ${collapse(ex.user)} OUTPUT: ${JSON.stringify(ex.assistant)}`;
   const compositeContent = [
-    '=== SYSTEM INSTRUCTIONS ===',
-    VIBE_MOD_SYSTEM_PROMPT,
-    '',
-    '=== EXAMPLES ===',
-    ...FEW_SHOT_EXAMPLES.map(
-      (ex, i) => `--- Example ${i + 1} ---\nINPUT:\n${ex.user}\n\nOUTPUT:\n${JSON.stringify(ex.assistant)}`,
-    ),
-    '',
-    '=== TASK ===',
-    `INPUT:\n${userRule.slice(0, 1000)}`,
-    ...(clarif ? ['', `CLARIFICATION:\n${clarif}`] : []),
-    '',
-    'OUTPUT:',
-  ].join('\n\n');
+    'SYSTEM INSTRUCTIONS:',
+    collapse(VIBE_MOD_SYSTEM_PROMPT),
+    'EXAMPLES:',
+    ...FEW_SHOT_EXAMPLES.map(exampleLine),
+    'TASK INPUT:',
+    collapse(userRule.slice(0, 1000)),
+    ...(clarif ? ['TASK CLARIFICATION:', collapse(clarif)] : []),
+    'OUTPUT (strict JSON only, no prose):',
+  ].join(' ');
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'user', content: compositeContent },
   ];
