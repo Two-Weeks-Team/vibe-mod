@@ -23,7 +23,17 @@ import type {
   SettingsValidationRequest,
   SettingsValidationResponse,
 } from '@devvit/web/shared';
-import { reddit, redis, settings, scheduler, type TaskRequest, type TaskResponse } from '@devvit/web/server';
+import {
+  reddit,
+  redis,
+  settings,
+  scheduler,
+  createServer,
+  getServerPort,
+  type TaskRequest,
+  type TaskResponse,
+} from '@devvit/web/server';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { RuleBundle, Rule, checkTreeDepth, type RuleBundleType, type RuleType } from '../shared/rule-schema';
 import { seedStarterRules } from '../shared/starter-rules';
 import { VIBE_MOD_SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from '../shared/system-prompt';
@@ -882,3 +892,69 @@ function isClarification(obj: unknown): obj is { needsClarification: true; quest
 }
 
 export default app;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Devvit Web server bootstrap
+//
+// Devvit's gateway POSTs to our endpoints; if we don't start an HTTP server
+// here, every request comes back as "fetch failed" / nothing renders. The
+// official pattern (devvit docs: "Cache helper" example) is:
+//   const server = createServer(app); server.listen(getServerPort());
+//
+// But Hono's `app` is an object (not a Node-style requestListener), so we have
+// to adapt Node's IncomingMessage → Web `Request` and pipe `app.fetch()`'s
+// Response back. We MUST go through Devvit's `createServer` (not @hono/node-server
+// directly) — Devvit's wrapper installs the per-request `runWithContext` that
+// makes `context.subredditName` etc. work inside our handlers.
+//
+// Guarded by typeof check so the unit tests that vi.mock('@devvit/web/server')
+// don't try to bind a port.
+// ─────────────────────────────────────────────────────────────────────────────
+async function readRequestBody(req: IncomingMessage): Promise<Buffer | undefined> {
+  if (req.method === 'GET' || req.method === 'HEAD') return undefined;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer));
+  }
+  return chunks.length ? Buffer.concat(chunks) : undefined;
+}
+
+async function nodeToHonoListener(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  try {
+    const url = `http://localhost${req.url ?? '/'}`;
+    const headers = new Headers();
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (typeof v === 'string') headers.set(k, v);
+      else if (Array.isArray(v)) headers.set(k, v.join(','));
+    }
+    const body = await readRequestBody(req);
+    // Devvit POSTs JSON bodies to our endpoints, so a UTF-8 string is fine.
+    // (Avoids a TS friction around Buffer↔BodyInit; sufficient for everything
+    // vibe-mod handles.)
+    const webBody = body ? body.toString('utf8') : undefined;
+    const webReq = new Request(url, { method: req.method ?? 'GET', headers, body: webBody });
+    const webRes = await app.fetch(webReq);
+    res.statusCode = webRes.status;
+    webRes.headers.forEach((value, name) => res.setHeader(name, value));
+    const text = webRes.body ? await webRes.text() : '';
+    res.end(text);
+  } catch (err) {
+    console.error('[vibe-mod] request adapter error:', err);
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader('content-type', 'application/json');
+    }
+    res.end(JSON.stringify({ status: 'error', message: 'internal adapter error' }));
+  }
+}
+
+if (typeof createServer === 'function' && typeof getServerPort === 'function') {
+  try {
+    const server = createServer(nodeToHonoListener);
+    server.on('error', (err: Error) => console.error('[vibe-mod] server error:', err));
+    server.listen(getServerPort());
+  } catch (err) {
+    // In tests, `vi.mock('@devvit/web/server', ...)` may stub these out → silently skip.
+    console.warn('[vibe-mod] server bootstrap skipped (test or non-Devvit runtime):', err);
+  }
+}

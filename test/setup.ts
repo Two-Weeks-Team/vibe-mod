@@ -37,6 +37,12 @@ vi.mock('@devvit/web/server', () => ({
   settings: fakeSettings,
   scheduler: fakeScheduler,
   context: fakeContext,
+  // Devvit Web's HTTP server bootstrap — stubbed in tests so the `index.ts`
+  // module load doesn't try to bind a port. The production path uses these to
+  // adapt Node IncomingMessage → Hono `app.fetch`; tests bypass it by calling
+  // `app.fetch()` directly with a Web `Request`.
+  createServer: undefined,
+  getServerPort: undefined,
 }));
 
 // Reset all doubles between tests so state never leaks across cases.
