@@ -250,4 +250,97 @@ describe('POST /internal/form/compose-rule-submit', () => {
     expect(body.showToast.appearance).toBe('neutral');
     expect(await fakeRedis.get('testsub:rules:draft')).toBeUndefined();
   });
+
+  // Tests for user-direction patch set (BYOK / plugin-RPC / mock provider) —
+  // verifies the resilient-fallback behaviour added when Devvit's plugin RPC
+  // layer is unavailable in some runtimes.
+
+  it('continues with the global key when subredditOpenaiApiKey lookup throws (optional BYOK)', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => {
+      if (k === 'subredditOpenaiApiKey') throw new Error('undefined undefined: undefined');
+      if (k === 'openaiApiKey') return 'sk-global';
+      return undefined;
+    });
+    fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
+
+    const body = await (
+      await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false })
+    ).json();
+    expect(body.showToast.appearance).toBe('success');
+    // confirm we DID call OpenAI (BYOK throw didn't fatal the flow)
+    expect(fakeFetch).toHaveBeenCalled();
+  });
+
+  it('skips the global-key lookup when a sub BYOK key is configured', async () => {
+    asMod();
+    let globalLookups = 0;
+    fakeSettings.get.mockImplementation(async (k: string) => {
+      if (k === 'subredditOpenaiApiKey') return 'sk-sub-byok';
+      if (k === 'openaiApiKey') {
+        globalLookups++;
+        return 'sk-should-not-be-called';
+      }
+      return undefined;
+    });
+    fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
+
+    await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false });
+    expect(globalLookups).toBe(0);
+  });
+
+  it('surfaces the plugin-RPC-unavailable toast when the global key lookup throws and no BYOK is set', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => {
+      if (k === 'subredditOpenaiApiKey') return '';
+      if (k === 'openaiApiKey') throw new Error('undefined undefined: undefined');
+      return undefined;
+    });
+
+    const body = await (
+      await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false })
+    ).json();
+    expect(body.showToast.appearance).toBe('neutral');
+    expect(body.showToast.text).toMatch(/Devvit settings\/plugin RPC is unavailable/);
+    // and we should NOT have called OpenAI (no key was reachable)
+    expect(fakeFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns the "no key configured" toast when settings work but the key is empty', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => {
+      if (k === 'subredditOpenaiApiKey') return '';
+      if (k === 'openaiApiKey') return '';
+      return undefined;
+    });
+
+    const body = await (
+      await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false })
+    ).json();
+    expect(body.showToast.text).toMatch(/No OpenAI API key configured/);
+  });
+
+  it('returns a deterministic fake compiled rule when VIBE_MOD_AI_PROVIDER=mock (local-only)', async () => {
+    asMod();
+    // Mock provider bypasses settings AND fetch entirely.
+    fakeSettings.get.mockImplementation(async () => {
+      throw new Error('should not be called');
+    });
+    const prev = process.env.VIBE_MOD_AI_PROVIDER;
+    process.env.VIBE_MOD_AI_PROVIDER = 'mock';
+    try {
+      const body = await (
+        await call('/internal/form/compose-rule-submit', {
+          rule: 'flag brand-new accounts within 72h',
+          allowGuarded: false,
+        })
+      ).json();
+      expect(body.showToast.appearance).toBe('success');
+      expect(body.showToast.text).toMatch(/Mock compiled rule/);
+      expect(fakeFetch).not.toHaveBeenCalled();
+    } finally {
+      if (prev === undefined) delete process.env.VIBE_MOD_AI_PROVIDER;
+      else process.env.VIBE_MOD_AI_PROVIDER = prev;
+    }
+  });
 });

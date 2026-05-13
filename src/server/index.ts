@@ -363,8 +363,13 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     const msg = String((err as Error)?.message ?? err);
     let userMsg: string;
     if (msg === 'no_key_plugin_rpc') {
+      // Devvit's settings plugin RPC is unreachable in this runtime — could
+      // not read openaiApiKey. We've observed this pattern alongside
+      // reddit/devvit#258 (custom-post submission gRPC failures), but the
+      // direct cause here is the Devvit settings/plugin RPC layer, not that
+      // specific issue. Phrase the toast accordingly.
       userMsg =
-        'Compiler offline: Devvit plugin RPC is unreachable (reddit/devvit#258, OPEN platform bug). settings.get(openaiApiKey) cannot return your key right now, so the compile cannot run. Once Reddit ships the platform fix, this same flow will produce the dry-run preview.';
+        'Devvit settings/plugin RPC is unavailable in this runtime. Could not read openaiApiKey, so the compile cannot run. (Possibly related to reddit/devvit#258 — same gRPC layer.) The same flow will produce the dry-run preview once the platform recovers.';
     } else if (msg === 'no_key') {
       userMsg = 'No OpenAI API key configured. Run `npx devvit settings set openaiApiKey` and try again.';
     } else {
@@ -1158,29 +1163,83 @@ async function callOpenAI(
   userRule: string,
   clarificationAnswer?: string,
 ): Promise<{ json: unknown; tokensIn: number; tokensOut: number }> {
+  // Local-only mock AI provider (gated, opt-in). When
+  //   VIBE_MOD_AI_PROVIDER=mock
+  // is set in the build environment (e.g. local playtest / replay), return a
+  // deterministic fake compiled rule without calling settings.get or fetch.
+  // Devvit Reddit runtime never sets this var, so production behaviour is
+  // unchanged. Useful for testing the compose flow against a real-shaped
+  // rule when plugin RPC is unreachable.
+  if (process.env.VIBE_MOD_AI_PROVIDER === 'mock') {
+    console.warn('[vibe-mod] callOpenAI: VIBE_MOD_AI_PROVIDER=mock — returning fake compiled rule');
+    return {
+      json: {
+        id: 'r_mock_demo',
+        name: 'Mock compiled rule (demo)',
+        sourceNL: userRule.slice(0, 200),
+        on: ['onPostSubmit'],
+        when: { all: [{ fact: 'author.accountAgeHours', op: 'lt', value: 72 }] },
+        then: [{ action: 'modqueue', params: { note: 'mock-demo' } }],
+      },
+      tokensIn: 0,
+      tokensOut: 0,
+    };
+  }
+
   // BYOK preference: sub-scope override key beats developer global key.
-  // settings.get currently throws \`undefined undefined: undefined\` whenever
-  // Devvit's plugin RPC sidecar is unreachable (reddit/devvit#258). Treat
-  // those throws as "key unavailable" so callers can surface the platform
-  // bug to the user instead of seeing the generic "Try again in a minute"
-  // toast. Distinct error code (\`no_key_plugin_rpc\`) lets the submit
-  // handler branch on the cause.
+  // settings.get can throw \`undefined undefined: undefined\` when Devvit's
+  // plugin RPC sidecar is unreachable. Treat *optional* BYOK failure as a
+  // warning only (per user-reviewed patch direction); fall through to the
+  // required global key. Skip the global-key lookup entirely when BYOK is
+  // present to save one RPC. The clarification answer is referenced below.
   let subKey = '';
-  let globalKey = '';
   try {
     subKey = ((await settings.get('subredditOpenaiApiKey')) as string) ?? '';
   } catch (err) {
-    console.warn('[vibe-mod] callOpenAI: settings.get(subredditOpenaiApiKey) threw:', describeErr(err));
-    throw new Error('no_key_plugin_rpc');
+    // Optional override; non-fatal. Continue to the global key path.
+    console.warn(
+      '[vibe-mod] callOpenAI: settings.get(subredditOpenaiApiKey) threw — continuing without BYOK:',
+      describeErr(err),
+    );
   }
-  try {
-    globalKey = ((await settings.get('openaiApiKey')) as string) ?? '';
-  } catch (err) {
-    console.warn('[vibe-mod] callOpenAI: settings.get(openaiApiKey) threw:', describeErr(err));
-    throw new Error('no_key_plugin_rpc');
+
+  let apiKey = subKey.trim();
+  let settingsRpcDown = false;
+  if (!apiKey) {
+    // No BYOK → required to read the global key. This one IS fatal if
+    // unreachable, but distinguish "plugin RPC unavailable" from "no key
+    // configured" so the caller can present an honest toast.
+    try {
+      const globalKey = ((await settings.get('openaiApiKey')) as string) ?? '';
+      apiKey = globalKey.trim();
+    } catch (err) {
+      settingsRpcDown = true;
+      console.warn('[vibe-mod] callOpenAI: settings.get(openaiApiKey) threw:', describeErr(err));
+    }
   }
-  const apiKey = (subKey?.trim() || globalKey || '').trim();
-  if (!apiKey) throw new Error('no_key');
+
+  // Local-only env fallback (gated, opt-in). When
+  //   VIBE_MOD_LOCAL_OPENAI_FALLBACK=1
+  // is set in the build environment AND no key was reachable via Devvit
+  // settings, fall back to \`process.env.OPENAI_API_KEY\`. Devvit Reddit
+  // runtime never sets either var, so production is unchanged. Document in
+  // .env.example as "local playtest only, not deployed runtime".
+  if (!apiKey && process.env.VIBE_MOD_LOCAL_OPENAI_FALLBACK === '1') {
+    const envKey = (process.env.OPENAI_API_KEY ?? '').trim();
+    if (envKey) {
+      console.warn(
+        '[vibe-mod] callOpenAI: using VIBE_MOD_LOCAL_OPENAI_FALLBACK=1 → process.env.OPENAI_API_KEY (local playtest only).',
+      );
+      apiKey = envKey;
+    }
+  }
+
+  if (!apiKey) {
+    // No key available anywhere. Distinguish the two failure shapes so the
+    // submit handler can branch (settings RPC down vs key never configured).
+    if (settingsRpcDown) throw new Error('no_key_plugin_rpc');
+    throw new Error('no_key');
+  }
 
   let model = 'gpt-5.4-mini';
   try {
