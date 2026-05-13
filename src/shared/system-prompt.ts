@@ -41,7 +41,7 @@ NOTES ON A FEW FACTS:
   - content.imageCount       number of image URLs detected in the body (+1 if the post links an image)
   - content.upperCaseRatio / content.title.upperCaseRatio   0..1; >0.7 ≈ "shouting"
   - content.nonAsciiRatio    0..1 fraction of non-ASCII chars; high ≈ non-Latin / likely non-English
-  - content.isLinkPost       true for a link/image/video submission (no text body); false for comments
+  - content.isLinkPost       true for a link/image/video submission; false for comments
   - content.url / content.urlDomain   full link / hostname of a link post ('' for text posts and comments)
 
 Action verbs (closed set):

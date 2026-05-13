@@ -56,10 +56,14 @@ function wordCountOf(s: string): number {
   return trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
 }
 
+// All HTTP(S) URLs in a chunk of text. Shared by link-count and image-detect —
+// safe to reuse one /g regex because `String.prototype.match` with a global
+// regex neither reads nor mutates `lastIndex`.
+const URL_RE = /https?:\/\/[^\s)]+/gi;
+
 // Heuristic image detection: a URL that points at a common image host or ends in
 // an image extension. Best-effort — the Devvit trigger payload doesn't give us a
 // structured media field, so we read the body text + the post's own link.
-const IMAGE_URL_RE = /https?:\/\/[^\s)]+/gi;
 function looksLikeImageUrl(u: string): boolean {
   let host = '';
   let path = u;
@@ -74,14 +78,13 @@ function looksLikeImageUrl(u: string): boolean {
   return /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/.test(path);
 }
 function imageUrlCountIn(text: string): number {
-  return (text.match(IMAGE_URL_RE) ?? []).filter(looksLikeImageUrl).length;
+  return (text.match(URL_RE) ?? []).filter(looksLikeImageUrl).length;
 }
 
 export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<FactBag> {
   const a = await getAuthorFacts(p.authorId, p.authorName);
   const body = p.body ?? '';
-  const linkRegex = /https?:\/\/[^\s)]+/gi;
-  const links = body.match(linkRegex) ?? [];
+  const links = body.match(URL_RE) ?? [];
   const upperCaseRatio = upperCaseRatioOf(body);
   const titleUpperCaseRatio = upperCaseRatioOf(p.title ?? '');
   let urlDomain = '';
@@ -127,8 +130,7 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
 
 export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Promise<FactBag> {
   const a = await getAuthorFacts(c.authorId, c.authorName);
-  const linkRegex = /https?:\/\/[^\s)]+/gi;
-  const links = c.body.match(linkRegex) ?? [];
+  const links = c.body.match(URL_RE) ?? [];
   const upperCaseRatio = upperCaseRatioOf(c.body);
 
   return {
