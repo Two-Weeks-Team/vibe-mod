@@ -37,9 +37,12 @@ export const FactPaths = [
 
   // Content (post or comment body)
   'content.length',
+  'content.wordCount', // whitespace-delimited token count of the body
   'content.linkCount',
-  'content.imageCount',
+  'content.imageCount', // image URLs detected in the body (+1 if the post itself links an image)
   'content.upperCaseRatio', // body's A–Z uppercase ratio (0 for link posts / empty bodies)
+  'content.nonAsciiRatio', // fraction of non-ASCII characters in the body (0 for empty body) — a crude "non-English / different script" signal
+  'content.isLinkPost', // true for a link/image/video submission (no selftext body); always false for comments
   'content.containsRegex', // requires .params.regex
   'content.title.length',
   'content.title.contains', // requires .params.needle

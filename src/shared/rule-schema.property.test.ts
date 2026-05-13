@@ -78,24 +78,27 @@ describe('Rule schema — properties', () => {
     fc.assert(
       fc.property(
         validRuleArb,
-        fc
-          .string({ minLength: 1, maxLength: 12 })
-          .filter(
-            (k) =>
-              ![
-                'id',
-                'name',
-                'sourceNL',
-                'on',
-                'when',
-                'then',
-                'rateLimit',
-                'enabled',
-                'shadow',
-                'createdAt',
-                'createdBy',
-              ].includes(k),
-          ),
+        fc.string({ minLength: 1, maxLength: 12 }).filter(
+          (k) =>
+            ![
+              'id',
+              'name',
+              'sourceNL',
+              'on',
+              'when',
+              'then',
+              'rateLimit',
+              'enabled',
+              'shadow',
+              'createdAt',
+              'createdBy',
+              // `__proto__` set via an object literal does not become an own
+              // enumerable property, and Zod additionally strips it as a
+              // prototype-pollution guard — so it can't be "smuggled" and
+              // isn't a meaningful "unknown field" for this test.
+              '__proto__',
+            ].includes(k),
+        ),
         fc.anything(),
         (raw, extraKey, extraVal) => {
           expect(() => Rule.parse({ ...raw, [extraKey]: extraVal })).toThrow();

@@ -1,7 +1,7 @@
 // shared/system-prompt.ts
-// System prompt + few-shot examples for OpenAI gpt-4o-mini.
-// Total system-prompt size: ~700 tokens. Anthropic prompt caching not
-// applicable to OpenAI, but the prompt is small enough to be cheap.
+// System prompt + few-shot examples for the rule compiler (OpenAI gpt-5.4-mini
+// by default; reasoning_effort: none, verbosity: low). Total system-prompt size
+// is small (~800 tokens) so each compile is cheap regardless of caching.
 
 import { FactPaths, SAFE_ACTIONS, GUARDED_ACTIONS } from './rule-schema';
 
@@ -35,6 +35,14 @@ OP set: eq, neq, lt, lte, gt, gte, in, contains, matches
 
 FACTS (closed set — never invent a new fact):
 ${FACTS}
+
+NOTES ON A FEW FACTS:
+  - content.wordCount        whitespace-delimited word count of the body
+  - content.imageCount       number of image URLs detected in the body (+1 if the post links an image)
+  - content.upperCaseRatio / content.title.upperCaseRatio   0..1; >0.7 ≈ "shouting"
+  - content.nonAsciiRatio    0..1 fraction of non-ASCII chars; high ≈ non-Latin / likely non-English
+  - content.isLinkPost       true for a link/image/video submission (no text body); false for comments
+  - content.url / content.urlDomain   full link / hostname of a link post ('' for text posts and comments)
 
 Action verbs (closed set):
   SAFE (use freely):     ${SAFE}
@@ -107,6 +115,22 @@ export const FEW_SHOT_EXAMPLES = [
         ],
       },
       then: [{ action: 'remove', params: { spam: true } }],
+    },
+  },
+  {
+    user: 'Send to the mod queue any link post from an account less than 7 days old',
+    assistant: {
+      id: 'r_new_account_link_post',
+      name: 'New-account link post → mod queue',
+      sourceNL: 'Send to the mod queue any link post from an account less than 7 days old',
+      on: ['onPostSubmit'],
+      when: {
+        all: [
+          { fact: 'content.isLinkPost', op: 'eq', value: true },
+          { fact: 'author.accountAgeHours', op: 'lt', value: 168 },
+        ],
+      },
+      then: [{ action: 'modqueue', params: { note: 'new-account link post (<7d)' } }],
     },
   },
   {
