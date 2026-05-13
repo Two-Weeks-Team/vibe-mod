@@ -1,4 +1,4 @@
-// eslint.config.js — flat config (ESLint 9). See https://eslint.org/docs/latest/use/configure/configuration-files
+// eslint.config.js — flat config (ESLint 10). See https://eslint.org/docs/latest/use/configure/configuration-files
 // Pairs with Prettier: this file owns *correctness* rules; Prettier owns formatting
 // (eslint-config-prettier, applied last, disables any formatting rules that would conflict).
 
@@ -27,6 +27,19 @@ export default tseslint.config(
       eqeqeq: ['error', 'smart'],
       'no-var': 'error',
       'prefer-const': 'error',
+      // ESLint 10 introduced `no-useless-assignment`, which fires on the
+      // common resilient-fallback pattern:
+      //
+      //   let bundle: T | null = null;       // <- flagged as useless
+      //   try { bundle = await fetchIt(); }
+      //   catch (err) { /* fall back */ }
+      //   if (!bundle) return ...;            // <- but the default IS used
+      //
+      // The default value IS read on the catch path; the rule's analysis
+      // doesn't see through the try/catch. Disable so we can keep the
+      // pattern (used heavily for reddit/devvit#258 workaround — every
+      // plugin RPC call is wrapped this way). See PR #30.
+      'no-useless-assignment': 'off',
     },
   },
   {
