@@ -9,7 +9,19 @@ import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['node_modules', 'dist', 'build', '.devvit', 'coverage', '**/*.d.ts'],
+    ignores: [
+      'node_modules',
+      'dist',
+      'build',
+      '.devvit',
+      'coverage',
+      '**/*.d.ts',
+      '.venv-chrome-auth',
+      'playwright/.auth',
+      'scripts/chrome-reddit-*.py',
+      'scripts/repro-*.mjs',
+      'scripts/test-*.mjs',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
