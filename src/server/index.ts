@@ -498,6 +498,10 @@ app.post('/internal/trigger/on-post-submit', async (c) => {
     title: post.title,
     body: post.selftext ?? '',
     url: post.url,
+    nsfw: post.nsfw,
+    isVideo: post.isVideo,
+    isSpoiler: post.isSpoiler,
+    crosspostParentId: post.crosspostParentId,
     authorId: author.id,
     authorName: author.name,
     sub: subreddit
@@ -685,6 +689,10 @@ app.post('/internal/scheduler/dry-run-replay', async (c) => {
               title: p.title,
               body: p.body ?? '',
               url: p.url,
+              nsfw: p.nsfw,
+              isSpoiler: p.spoiler, // the Post model exposes `spoiler` (PostV2 calls it isSpoiler)
+              // isVideo / crosspostParentId aren't on the Post model — dry-run preview
+              // treats them as false; the live trigger gets the real values from PostV2.
               authorId: p.authorId ?? 't2_unknown',
               authorName: p.authorName,
             },
