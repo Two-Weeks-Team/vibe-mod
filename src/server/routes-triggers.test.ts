@@ -144,25 +144,18 @@ describe('POST /internal/trigger/on-comment-submit', () => {
 });
 
 describe('POST /internal/trigger/on-app-install', () => {
-  // The handler defers seeding to a one-shot scheduler job (`seed-on-install`)
-  // and returns immediately — past inline-seeding installs were rolled back as
-  // "context canceled" because Devvit's trigger deadline raced the cold-start /
-  // Redis writes. Seeding semantics live in the scheduler tests below.
-  it('returns ok and schedules the seed-on-install job (no inline writes)', async () => {
+  // The handler is bare-minimum — returns 200 immediately, NO body parse, NO
+  // I/O, NO scheduler. Even a try/catch + scheduler.runJob() was enough to push
+  // the first-request cold start over Devvit's install-trigger RPC deadline
+  // (failed in production with "context canceled" on a 2 MB CJS bundle).
+  // Seeding moved to a manual scheduler endpoint (`/internal/scheduler/seed-on-install`)
+  // for explicit invocation post-install.
+  it('returns ok immediately with no side effects (no Redis writes, no scheduler call)', async () => {
     const res = await call('/internal/trigger/on-app-install', { type: 'AppInstall' });
     expect(await res.json()).toEqual({ status: 'ok' });
-    expect(fakeScheduler.runJob).toHaveBeenCalledWith(expect.objectContaining({ name: 'seed-on-install' }));
-    // Critically: the install handler must NOT touch Redis itself (so even if
-    // Redis is slow / unavailable, the install completes and Devvit doesn't
-    // mark it failed).
+    expect(fakeScheduler.runJob).not.toHaveBeenCalled();
     expect(await fakeRedis.get('testsub:rules:active')).toBeUndefined();
     expect(await fakeRedis.get('testsub:rules:draft')).toBeUndefined();
-  });
-
-  it('returns ok even if scheduling the seed job throws (install must not fail)', async () => {
-    fakeScheduler.runJob.mockRejectedValueOnce(new Error('scheduler down'));
-    const res = await call('/internal/trigger/on-app-install', { type: 'AppInstall' });
-    expect(await res.json()).toEqual({ status: 'ok' });
   });
 });
 
