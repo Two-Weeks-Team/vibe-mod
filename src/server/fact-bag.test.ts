@@ -77,6 +77,26 @@ describe('buildPostFactBag', () => {
     expect(intl['content.isLinkPost']).toBe(false);
   });
 
+  it('passes through the post flags over18 / isVideo / isSpoiler / isCrosspost (v0.2.1 facts)', async () => {
+    const flagged = await buildPostFactBag({
+      ...POST,
+      nsfw: true,
+      isVideo: true,
+      isSpoiler: true,
+      crosspostParentId: 't3_orig',
+    });
+    expect(flagged['content.over18']).toBe(true);
+    expect(flagged['content.isVideo']).toBe(true);
+    expect(flagged['content.isSpoiler']).toBe(true);
+    expect(flagged['content.isCrosspost']).toBe(true);
+    // default (flags omitted) → all false
+    const plain = await buildPostFactBag(POST);
+    expect(plain['content.over18']).toBe(false);
+    expect(plain['content.isVideo']).toBe(false);
+    expect(plain['content.isSpoiler']).toBe(false);
+    expect(plain['content.isCrosspost']).toBe(false);
+  });
+
   it('uses safe zero/false defaults for missing optional inputs', async () => {
     const bag = await buildPostFactBag({ id: 't3_x', authorId: 't2_x', authorName: 'bob' });
     expect(bag['content.length']).toBe(0);
@@ -114,7 +134,16 @@ describe('buildCommentFactBag', () => {
     expect(bag['content.title.contains']).toBe('');
     expect(bag['content.url']).toBe('');
     expect(bag['content.containsRegex']).toBe('nice POST friend');
-    expect(bag['content.isLinkPost']).toBe(false); // never applies to comments
+    // post-only flags are always false/0 for comments
+    for (const k of [
+      'content.isLinkPost',
+      'content.over18',
+      'content.isVideo',
+      'content.isSpoiler',
+      'content.isCrosspost',
+    ] as const) {
+      expect(bag[k]).toBe(false);
+    }
   });
 
   it('computes wordCount / imageCount / nonAsciiRatio for comment bodies', async () => {
@@ -153,7 +182,7 @@ describe('author facts', () => {
     expect(bag['author.totalKarma']).toBe(ESTABLISHED);
   });
 
-  it('derives account age, karma, and mod status from the Reddit API', async () => {
+  it('derives account age, karma (incl. post/comment split), and mod status from the Reddit API', async () => {
     const created = new Date(Date.now() - 50 * 3_600_000); // 50h old
     fakeReddit.getUserByUsername.mockResolvedValue({ createdAt: created, linkKarma: 30, commentKarma: 70 });
     fakeReddit.getUserKarmaFromCurrentSubreddit.mockResolvedValue({ fromComments: 5, fromPosts: 7 });
@@ -162,6 +191,8 @@ describe('author facts', () => {
     const bag = await buildPostFactBag(POST);
     expect(bag['author.accountAgeHours']).toBe(50);
     expect(bag['author.totalKarma']).toBe(100);
+    expect(bag['author.postKarma']).toBe(30);
+    expect(bag['author.commentKarma']).toBe(70);
     expect(bag['author.subKarma']).toBe(12); // fromComments + fromPosts
     expect(bag['author.isModerator']).toBe(true);
   });
