@@ -33,14 +33,14 @@ PredicateTree shapes:
 
 OP set: eq, neq, lt, lte, gt, gte, in, contains, matches
 
-FACTS (closed set — never invent a new fact):
+FACTS (closed set -- never invent a new fact):
 ${FACTS}
 
 NOTES ON A FEW FACTS:
   - content.wordCount        whitespace-delimited word count of the body
   - content.imageCount       number of image URLs detected in the body (+1 if the post links an image)
-  - content.upperCaseRatio / content.title.upperCaseRatio   0..1; >0.7 ≈ "shouting"
-  - content.nonAsciiRatio    0..1 fraction of non-ASCII chars; high ≈ non-Latin / likely non-English
+  - content.upperCaseRatio / content.title.upperCaseRatio   0..1; >0.7 means "shouting"
+  - content.nonAsciiRatio    0..1 fraction of non-ASCII chars; high means non-Latin / likely non-English
   - content.isLinkPost       true for a link/image/video submission; false for comments
   - content.over18           the POST's own NSFW flag (not the subreddit's); false for comments
   - content.isVideo / content.isSpoiler / content.isCrosspost   post flags; all false for comments
@@ -73,7 +73,7 @@ CRITICAL RULES:
   4. Use "remove" only if the mod explicitly says remove/delete/take down.
   5. NEVER emit GUARDED actions (ban/mute/permaban) unless the moderator
      used those exact verbs. If they said "remove repeat spammers", emit
-     "remove" + "modqueue" — NOT ban.
+     "remove" + "modqueue", NOT ban.
   6. For ambiguous time/quantity wording ("new accounts", "low karma", etc.),
      emit the clarification response below.
 
@@ -124,7 +124,7 @@ export const FEW_SHOT_EXAMPLES = [
     user: 'Send to the mod queue any link post from an account less than 7 days old',
     assistant: {
       id: 'r_new_account_link_post',
-      name: 'New-account link post → mod queue',
+      name: 'New-account link post -> mod queue',
       sourceNL: 'Send to the mod queue any link post from an account less than 7 days old',
       on: ['onPostSubmit'],
       when: {
@@ -138,7 +138,7 @@ export const FEW_SHOT_EXAMPLES = [
   },
   {
     user: 'Auto-approve any post from a user who has more than a year of karma here',
-    // Ambiguous: "year of karma" — is it account age, or activity in this sub?
+    // Ambiguous: "year of karma" -- is it account age, or activity in this sub?
     assistant: {
       needsClarification: true,
       question: 'Did you mean: account age > 1 year (anywhere on Reddit), or active in THIS sub > 1 year?',
