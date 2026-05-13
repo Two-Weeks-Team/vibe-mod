@@ -37,15 +37,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { RuleBundle, Rule, checkTreeDepth, type RuleBundleType, type RuleType } from '../shared/rule-schema';
 import { seedStarterRules } from '../shared/starter-rules';
 import { VIBE_MOD_SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from '../shared/system-prompt';
+import { LIMITS } from '../shared/limits';
+import { keys } from '../shared/redis-keys';
 import { buildPostFactBag, buildCommentFactBag } from './fact-bag';
 import { selectMatchingRules } from './evaluator';
 import { executeActions, rollbackAction, acquireOnce } from './executor';
 import { getCurrentSubredditName, getCurrentSubredditRef } from './devvit-helpers';
 
 const app = new Hono();
-const COMPILE_RATE_LIMIT_PER_DAY = 50;
-const MOD_LIST_CACHE_SECONDS = 5 * 60;
-const TRIGGER_DEDUPE_SECONDS = 10 * 60;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared: moderator authorization guard (audit FIND-03 fix)
@@ -59,7 +58,7 @@ async function isCallerModerator(): Promise<boolean> {
     const subredditName = getCurrentSubredditName();
     if (!subredditName) return false;
 
-    const cacheKey = `${subredditName}:modlist`;
+    const cacheKey = keys.modlist(subredditName);
     const cached = await redis.get(cacheKey);
     let mods: string[];
     if (cached) {
@@ -68,7 +67,7 @@ async function isCallerModerator(): Promise<boolean> {
       const list = await reddit.getModerators({ subredditName });
       mods = (await list.all()).map((m) => m.username);
       await redis.set(cacheKey, JSON.stringify(mods));
-      await redis.expire(cacheKey, MOD_LIST_CACHE_SECONDS);
+      await redis.expire(cacheKey, LIMITS.MOD_LIST_CACHE_SECONDS);
     }
     return mods.includes(user.username);
   } catch (err) {
@@ -131,14 +130,14 @@ app.post('/internal/menu/compose-rule', async (c) => {
   }
 
   const subredditName = getCurrentSubredditName();
-  const dailyCount = Number((await redis.get(`${subredditName}:compile:count:${todayKey()}`)) ?? '0');
+  const dailyCount = Number((await redis.get(keys.compileCount(subredditName, todayKey()))) ?? '0');
 
   return c.json<UiResponse>({
     showForm: {
       name: 'ruleComposerForm',
       form: {
         title: `Compose rule for r/${subredditName}`,
-        description: `Compiles used today: ${dailyCount} / ${COMPILE_RATE_LIMIT_PER_DAY}.\nYour rule will be saved as a draft. Dry-run preview runs automatically.`,
+        description: `Compiles used today: ${dailyCount} / ${LIMITS.COMPILE_RATE_LIMIT_PER_DAY}.\nYour rule will be saved as a draft. Dry-run preview runs automatically.`,
         acceptLabel: 'Compile + Preview',
         cancelLabel: 'Cancel',
         fields: [
@@ -182,17 +181,17 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
   const subredditName = getCurrentSubredditName();
 
   // Rate limit (sub-scoped)
-  const todayCounterKey = `${subredditName}:compile:count:${todayKey()}`;
+  const todayCounterKey = keys.compileCount(subredditName, todayKey());
   const todayCount = Number((await redis.get(todayCounterKey)) ?? '0');
 
   // Check if BYOK key is present (skip quota for BYOK)
   const subOverrideKey = (await settings.get('subredditOpenaiApiKey')) as string;
   const usingBYOK = !!subOverrideKey?.trim();
 
-  if (!usingBYOK && todayCount >= COMPILE_RATE_LIMIT_PER_DAY) {
+  if (!usingBYOK && todayCount >= LIMITS.COMPILE_RATE_LIMIT_PER_DAY) {
     return c.json<UiResponse>({
       showToast: {
-        text: `Compile quota reached (${COMPILE_RATE_LIMIT_PER_DAY}/day). Paste your own OpenAI key in settings to bypass.`,
+        text: `Compile quota reached (${LIMITS.COMPILE_RATE_LIMIT_PER_DAY}/day). Paste your own OpenAI key in settings to bypass.`,
         appearance: 'neutral',
       },
     });
@@ -288,7 +287,7 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
   }
 
   // Append to draft bundle (sub-scoped key)
-  const draftKey = `${subredditName}:rules:draft`;
+  const draftKey = keys.rulesDraft(subredditName);
   const draftJson = await redis.get(draftKey);
   const draft: RuleBundleType = safeParseBundle(draftJson, 'compose/draft') ?? {
     schemaVersion: '1.0.0',
@@ -348,21 +347,21 @@ app.post('/internal/menu/dashboard', async (c) => {
   }
 
   const subredditName = getCurrentSubredditName();
-  const active = safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'dashboard/active');
-  const draft = safeParseBundle(await redis.get(`${subredditName}:rules:draft`), 'dashboard/draft');
+  const active = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'dashboard/active');
+  const draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'dashboard/draft');
 
-  const auditKey = `${subredditName}:audit`;
+  const auditKey = keys.audit(subredditName);
   const recentIds = await redis.zRange(auditKey, 0, 19, { by: 'rank', reverse: true });
   const recent: Array<Record<string, string>> = [];
   for (const m of recentIds) {
-    const h = await redis.hGetAll(`${subredditName}:audit:${m.member}`);
+    const h = await redis.hGetAll(keys.auditEntry(subredditName, m.member));
     recent.push({ ...h, id: String(m.member) });
   }
 
   // Dry-run results for the draft rules (written by /internal/scheduler/dry-run-replay).
   const dryRunLines: string[] = [];
   for (const r of draft?.rules ?? []) {
-    const raw = await redis.get(`${subredditName}:dryrun:${r.id}`);
+    const raw = await redis.get(keys.dryrun(subredditName, r.id));
     if (!raw) continue;
     const d = JSON.parse(raw) as DryRunResult;
     if (d.status === 'ok') {
@@ -408,7 +407,7 @@ app.post('/internal/form/dashboard-action', async (c) => {
   if (!activate) return c.json<UiResponse>({ showToast: 'No action taken.' });
 
   const subredditName = getCurrentSubredditName();
-  const draft = safeParseBundle(await redis.get(`${subredditName}:rules:draft`), 'activate/draft');
+  const draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'activate/draft');
   if (!draft || draft.rules.length === 0) return c.json<UiResponse>({ showToast: 'No draft to activate.' });
 
   // Stamp the activation time so the shadow-mode window is measured from when the
@@ -417,14 +416,14 @@ app.post('/internal/form/dashboard-action', async (c) => {
   // Carry over an existing activatedAt for a rule that's already active under the
   // same id (re-activating after an edit must not reset its shadow clock).
   const prevActivatedAt = new Map<string, number>(
-    (safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'activate/prev-active')?.rules ?? [])
+    (safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'activate/prev-active')?.rules ?? [])
       .filter((r): r is RuleType & { activatedAt: number } => typeof r.activatedAt === 'number')
       .map((r) => [r.id, r.activatedAt]),
   );
   const now = Date.now();
   for (const r of draft.rules) r.activatedAt ??= prevActivatedAt.get(r.id) ?? now;
 
-  await redis.set(`${subredditName}:rules:active`, JSON.stringify(draft));
+  await redis.set(keys.rulesActive(subredditName), JSON.stringify(draft));
   return c.json<UiResponse>({
     showToast: {
       text: 'Draft activated. Shadow mode is ON by default — promote per rule in next 24h.',
@@ -444,11 +443,11 @@ app.post('/internal/menu/undo-action', async (c) => {
   if (!targetId) return c.json<UiResponse>({ showToast: 'No target.' });
 
   const subredditName = getCurrentSubredditName();
-  const auditKey = `${subredditName}:audit`;
+  const auditKey = keys.audit(subredditName);
   const recentIds = await redis.zRange(auditKey, 0, 99, { by: 'rank', reverse: true });
   let found: string | null = null;
   for (const m of recentIds) {
-    const h = await redis.hGetAll(`${subredditName}:audit:${m.member}`);
+    const h = await redis.hGetAll(keys.auditEntry(subredditName, m.member));
     if (h.thingId === targetId && h.outcome === 'applied' && !h.rolledBack) {
       found = m.member as string;
       break;
@@ -473,11 +472,11 @@ app.post('/internal/menu/undo-action', async (c) => {
 // ─────────────────────────────────────────────────────────────────────────────
 async function isDuplicateTrigger(trigger: string, thingId: string): Promise<boolean> {
   const subName = getCurrentSubredditName();
-  const dedupeKey = `${subName}:seen:${trigger}:${thingId}`;
+  const dedupeKey = keys.seen(subName, trigger, thingId);
   // We process this trigger iff we win the "acquire once" race; otherwise it's
   // a duplicate delivery (audit Gap #5 — the old watch/multi/exec never checked
   // exec()'s result, so a real concurrent re-delivery still double-processed).
-  return !(await acquireOnce(dedupeKey, TRIGGER_DEDUPE_SECONDS));
+  return !(await acquireOnce(dedupeKey, LIMITS.TRIGGER_DEDUPE_SECONDS));
 }
 
 // Parse a persisted RuleBundle, returning null (treated as "no rules" — the
@@ -519,7 +518,7 @@ app.post('/internal/trigger/on-post-submit', async (c) => {
   });
 
   const subredditName = getCurrentSubredditName();
-  const bundle = safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'on-post-submit');
+  const bundle = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'on-post-submit');
   if (!bundle) return c.json<TriggerResponse>({ status: 'ok' });
   const matching = selectMatchingRules(bundle.rules, 'onPostSubmit', facts);
 
@@ -558,7 +557,7 @@ app.post('/internal/trigger/on-comment-submit', async (c) => {
   });
 
   const subredditName = getCurrentSubredditName();
-  const bundle = safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'on-comment-submit');
+  const bundle = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'on-comment-submit');
   if (!bundle) return c.json<TriggerResponse>({ status: 'ok' });
   const matching = selectMatchingRules(bundle.rules, 'onCommentSubmit', facts);
 
@@ -594,7 +593,7 @@ app.post('/internal/scheduler/seed-on-install', async (c) => {
   await c.req.json<TaskRequest>().catch(() => null);
   try {
     const subredditName = getCurrentSubredditName();
-    const activeKey = `${subredditName}:rules:active`;
+    const activeKey = keys.rulesActive(subredditName);
     if (!(await redis.get(activeKey))) {
       const emptyActive: RuleBundleType = {
         schemaVersion: '1.0.0',
@@ -607,7 +606,7 @@ app.post('/internal/scheduler/seed-on-install', async (c) => {
       };
       await redis.set(activeKey, JSON.stringify(emptyActive));
     }
-    const draftKey = `${subredditName}:rules:draft`;
+    const draftKey = keys.rulesDraft(subredditName);
     if (!(await redis.get(draftKey))) {
       await redis.set(draftKey, JSON.stringify(seedStarterRules(Date.now())));
     }
@@ -638,13 +637,13 @@ app.post('/internal/trigger/on-comment-report', async (c) => {
 app.post('/internal/scheduler/audit-retention', async (c) => {
   await c.req.json<TaskRequest>();
   const subredditName = getCurrentSubredditName();
-  const auditKey = `${subredditName}:audit`;
+  const auditKey = keys.audit(subredditName);
   const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
   // 1. Get IDs to delete (so we can also delete their hashes)
   const toDelete = await redis.zRange(auditKey, 0, cutoff, { by: 'score' });
   for (const m of toDelete) {
-    await redis.del(`${subredditName}:audit:${m.member}`);
+    await redis.del(keys.auditEntry(subredditName, m.member));
   }
   // 2. Remove from ZSet
   await redis.zRemRangeByScore(auditKey, 0, cutoff);
@@ -657,8 +656,6 @@ app.post('/internal/scheduler/audit-retention', async (c) => {
 // a `${sub}:dryrun:${ruleId}` summary the Dashboard renders. v0.1 samples posts
 // only (no `getNewComments` in the SDK); a comment-only rule gets a "shadow-mode
 // it to see real comments" note.
-const DRY_RUN_SAMPLE = 10; // recent posts to replay (×~3 Reddit API calls each via the fact bag)
-const DRY_RUN_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 interface DryRunResult {
   ruleId: string;
@@ -685,7 +682,7 @@ app.post('/internal/scheduler/dry-run-replay', async (c) => {
     matched: [],
   };
   try {
-    const draftJson = await redis.get(`${sub}:rules:draft`);
+    const draftJson = await redis.get(keys.rulesDraft(sub));
     const rule = draftJson ? RuleBundle.parse(JSON.parse(draftJson)).rules.find((r) => r.id === ruleId) : undefined;
     if (!rule) {
       result.status = 'unavailable';
@@ -702,7 +699,7 @@ app.post('/internal/scheduler/dry-run-replay', async (c) => {
         result.note =
           'This rule listens to comment events. v0.1 dry-run replays recent posts only — activate it (shadow mode is ON by default) to see how it behaves on real comments.';
       } else {
-        const posts = await reddit.getNewPosts({ subredditName: sub, limit: DRY_RUN_SAMPLE }).all();
+        const posts = await reddit.getNewPosts({ subredditName: sub, limit: LIMITS.DRY_RUN_SAMPLE }).all();
         for (const p of posts) {
           result.sampledPosts++;
           const facts = await buildPostFactBag(
@@ -736,8 +733,8 @@ app.post('/internal/scheduler/dry-run-replay', async (c) => {
     result.note = `Dry-run replay couldn't complete (${String(err).slice(0, 120)}). Activate in shadow mode to observe live behaviour instead.`;
   }
 
-  await redis.set(`${sub}:dryrun:${ruleId}`, JSON.stringify(result));
-  await redis.expire(`${sub}:dryrun:${ruleId}`, DRY_RUN_TTL_SECONDS);
+  await redis.set(keys.dryrun(sub, ruleId), JSON.stringify(result));
+  await redis.expire(keys.dryrun(sub, ruleId), LIMITS.DRY_RUN_TTL_SECONDS);
   return c.json<TaskResponse>({ status: 'ok' });
 });
 
@@ -747,7 +744,7 @@ app.post('/internal/scheduler/shadow-promote-check', async (c) => {
   const shadowHours = ((await settings.get('shadowDurationHours')) as number) ?? 24;
   if (shadowHours <= 0) return c.json<TaskResponse>({ status: 'ok' });
 
-  const bundle = safeParseBundle(await redis.get(`${subredditName}:rules:active`), 'shadow-promote-check');
+  const bundle = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'shadow-promote-check');
   if (!bundle) return c.json<TaskResponse>({ status: 'ok' });
 
   const now = Date.now();
@@ -763,7 +760,7 @@ app.post('/internal/scheduler/shadow-promote-check', async (c) => {
       changed = true;
     }
   }
-  if (changed) await redis.set(`${subredditName}:rules:active`, JSON.stringify(bundle));
+  if (changed) await redis.set(keys.rulesActive(subredditName), JSON.stringify(bundle));
   return c.json<TaskResponse>({ status: 'ok' });
 });
 
@@ -775,12 +772,12 @@ app.post('/internal/scheduler/rate-limit-circuit-breaker', async (c) => {
 
   // FIND-04 fix: count audit entries in the last-hour SCORE window, not all-time.
   // The Devvit redis client has no zCount, so range-scan by score and count.
-  const auditKey = `${subredditName}:audit`;
+  const auditKey = keys.audit(subredditName);
   const recentCount = (await redis.zRange(auditKey, oneHourAgo, Number.MAX_SAFE_INTEGER, { by: 'score' })).length;
 
   if (recentCount > maxPerHour) {
-    await redis.set(`${subredditName}:circuit:open`, '1');
-    await redis.expire(`${subredditName}:circuit:open`, 600);
+    await redis.set(keys.circuitOpen(subredditName), '1');
+    await redis.expire(keys.circuitOpen(subredditName), 600);
 
     try {
       await reddit.modMail.createModNotification({
