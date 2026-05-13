@@ -5,9 +5,9 @@
 
 import { reddit, redis } from '@devvit/web/server';
 import type { FactBag } from '../shared/rule-schema';
+import { LIMITS } from '../shared/limits';
+import { keys } from '../shared/redis-keys';
 import { getCurrentSubredditName } from './devvit-helpers';
-
-const USER_CACHE_TTL_SECONDS = 60 * 60; // 1h author cache
 
 interface PostInput {
   id: string;
@@ -214,7 +214,7 @@ async function getAuthorFacts(authorId: string, authorName: string): Promise<Aut
   // SECURITY: All Redis keys are sub-scoped. Devvit Redis is per-install,
   // but defense-in-depth — if Reddit changes the isolation model, we don't leak.
   const subName = getCurrentSubredditName();
-  const cacheKey = `${subName}:author:${authorId}`;
+  const cacheKey = keys.author(subName, authorId);
   const cached = await redis.get(cacheKey);
   if (cached) {
     try {
@@ -281,6 +281,6 @@ async function getAuthorFacts(authorId: string, authorName: string): Promise<Aut
   };
 
   await redis.set(cacheKey, JSON.stringify(facts));
-  await redis.expire(cacheKey, USER_CACHE_TTL_SECONDS);
+  await redis.expire(cacheKey, LIMITS.USER_CACHE_TTL_SECONDS);
   return facts;
 }

@@ -4,10 +4,10 @@
 
 import { reddit, redis, settings } from '@devvit/web/server';
 import type { ActionType, RuleType } from '../shared/rule-schema';
+import { LIMITS } from '../shared/limits';
+import { keys, globalKeys } from '../shared/redis-keys';
+import type { Outcome } from '../shared/outcomes';
 import { asT1, asT3, getCurrentSubredditName } from './devvit-helpers';
-
-const ROLLBACK_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
-const AUDIT_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days — audit detail hashes auto-expire
 
 export interface AuditEntry {
   actionId: string;
@@ -19,7 +19,7 @@ export interface AuditEntry {
   params: Record<string, unknown>;
   authorName: string;
   ts: number;
-  outcome: 'applied' | 'shadow' | 'rate_limited' | 'guarded_skip' | 'error';
+  outcome: Outcome;
   errorMessage?: string;
 }
 
@@ -50,20 +50,20 @@ export async function executeActions(ctx: ExecutionContext): Promise<AuditEntry[
   // Global kill switch (set by an admin menu action or remote ops procedure).
   // Used during beta to halt all action across all installs in seconds.
   // Intentionally NOT sub-scoped — one flag freezes every install.
-  if ((await redis.get('circuit:beta_freeze')) === '1') return shortCircuit('rate_limited');
+  if ((await redis.get(globalKeys.betaFreeze())) === '1') return shortCircuit('rate_limited');
 
   // Per-sub rate-limit circuit breaker (set by the cron scheduler when this
   // sub's actions/hour exceed maxActionsPerHour). Key is sub-scoped to match
   // /internal/scheduler/rate-limit-circuit-breaker.
-  if ((await redis.get(`${subName}:circuit:open`)) === '1') return shortCircuit('rate_limited');
+  if ((await redis.get(keys.circuitOpen(subName))) === '1') return shortCircuit('rate_limited');
 
   // Per-rule per-author rate limit — atomic "acquire once" prevents the TOCTOU
   // race a plain get-then-set has (audit FIND-10 fix).
   if (ctx.rule.rateLimit?.perAuthor) {
     const window = ctx.rule.rateLimit.perAuthor;
     const ttl = window === '1/min' ? 60 : window === '1/hour' ? 3600 : 86400;
-    const key = `${subName}:ratelimit:${ctx.rule.id}:${ctx.authorId}`;
-    if (!(await acquireOnce(key, ttl))) return shortCircuit('rate_limited');
+    if (!(await acquireOnce(keys.rateLimit(subName, ctx.rule.id, ctx.authorId), ttl)))
+      return shortCircuit('rate_limited');
   }
 
   // NB: GUARDED actions (ban/mute/permaban) are NOT skipped here — they only
@@ -178,7 +178,7 @@ export async function rollbackAction(
   subredditName: string,
   actionId: string,
 ): Promise<{ ok: boolean; reason?: string }> {
-  const rollbackJson = await redis.get(`${subredditName}:rollback:${actionId}`);
+  const rollbackJson = await redis.get(keys.rollback(subredditName, actionId));
   if (!rollbackJson) return { ok: false, reason: 'Rollback window expired or never existed' };
 
   const rollback = JSON.parse(rollbackJson) as { entry: AuditEntry; reverseParams: Record<string, unknown> };
@@ -204,8 +204,8 @@ export async function rollbackAction(
     }
 
     // Mark rollback consumed
-    await redis.del(`${subredditName}:rollback:${actionId}`);
-    await redis.hSet(`${subredditName}:audit:${actionId}`, { rolledBack: '1', rolledBackAt: String(Date.now()) });
+    await redis.del(keys.rollback(subredditName, actionId));
+    await redis.hSet(keys.auditEntry(subredditName, actionId), { rolledBack: '1', rolledBackAt: String(Date.now()) });
     return { ok: true };
   } catch (err) {
     return { ok: false, reason: String(err) };
@@ -236,7 +236,7 @@ function auditEntry(
   ctx: ExecutionContext,
   action: string,
   params: Record<string, unknown>,
-  outcome: AuditEntry['outcome'],
+  outcome: Outcome,
   errorMessage?: string,
 ): AuditEntry {
   return {
@@ -261,10 +261,10 @@ function auditEntry(
 // every outcome (shadow / applied / rate_limited / error) so the Dashboard log
 // reflects what each rule did or would have done.
 async function writeAudit(subName: string, entry: AuditEntry): Promise<void> {
-  const txn = await redis.watch(`${subName}:audit:${entry.actionId}`);
+  const txn = await redis.watch(keys.auditEntry(subName, entry.actionId));
   await txn.multi();
-  await txn.zAdd(`${subName}:audit`, { member: entry.actionId, score: entry.ts });
-  await txn.hSet(`${subName}:audit:${entry.actionId}`, {
+  await txn.zAdd(keys.audit(subName), { member: entry.actionId, score: entry.ts });
+  await txn.hSet(keys.auditEntry(subName, entry.actionId), {
     ruleId: entry.ruleId,
     ruleSourceNL: entry.ruleSourceNL,
     thingId: entry.thingId,
@@ -276,7 +276,7 @@ async function writeAudit(subName: string, entry: AuditEntry): Promise<void> {
     outcome: entry.outcome,
     ...(entry.errorMessage ? { errorMessage: entry.errorMessage.slice(0, 300) } : {}),
   });
-  await txn.expire(`${subName}:audit:${entry.actionId}`, AUDIT_TTL_SECONDS);
+  await txn.expire(keys.auditEntry(subName, entry.actionId), LIMITS.AUDIT_TTL_SECONDS);
   await txn.exec();
 }
 
@@ -289,7 +289,7 @@ async function writeAuditAndRollback(
   reverseParams: Record<string, unknown>,
 ): Promise<void> {
   await writeAudit(subName, entry);
-  await redis.set(`${subName}:rollback:${entry.actionId}`, JSON.stringify({ entry, reverseParams }), {
-    expiration: new Date(Date.now() + ROLLBACK_TTL_SECONDS * 1000),
+  await redis.set(keys.rollback(subName, entry.actionId), JSON.stringify({ entry, reverseParams }), {
+    expiration: new Date(Date.now() + LIMITS.ROLLBACK_TTL_SECONDS * 1000),
   });
 }

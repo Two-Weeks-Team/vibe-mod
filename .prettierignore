@@ -5,6 +5,8 @@ build
 coverage
 package-lock.json
 docs/*.html
+claudedocs/**/*.html
+claudedocs/**/*.htm
 # Markdown left to the author — Prettier bloats tables and rewraps prose.
 *.md
 **/*.md

@@ -2,7 +2,7 @@
 // Pure deterministic predicate evaluator. ZERO LLM calls.
 // Called on every onPostSubmit / onCommentSubmit / onReport.
 
-import type { FactBag, RuleType } from '../shared/rule-schema';
+import type { FactBag, RuleTriggerName, RuleType } from '../shared/rule-schema';
 
 type PredicateTree =
   | { fact: string; op: string; value: unknown }
@@ -76,11 +76,7 @@ export function evaluatePredicate(tree: PredicateTree, facts: FactBag): boolean 
  * Returns rules to execute in order. Skips disabled rules.
  * Honors shadow flag (caller decides whether to actually act on shadow rules).
  */
-export function selectMatchingRules(
-  rules: RuleType[],
-  trigger: 'onPostSubmit' | 'onCommentSubmit' | 'onPostReport' | 'onCommentReport',
-  facts: FactBag,
-): RuleType[] {
+export function selectMatchingRules(rules: RuleType[], trigger: RuleTriggerName, facts: FactBag): RuleType[] {
   return rules.filter((r) => {
     if (!r.enabled) return false;
     if (!r.on.includes(trigger)) return false;
