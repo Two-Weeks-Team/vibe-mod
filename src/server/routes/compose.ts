@@ -33,7 +33,6 @@ import {
   humanizeRule,
   isClarification,
   readOpenaiModel,
-  summarizeRule,
   todayKey,
   unwrapFormString,
 } from '../helpers/openai';
@@ -313,16 +312,58 @@ export function registerComposeRoutes(app: Hono): void {
       });
     }
 
-    // Audit finding #2 — confirmation form before persistence.
+    // Audit finding #2 + Phase 2c demo-recording UX clean-up — confirmation
+    // form before persistence. The previous shape carried 7 internal fields
+    // through the form (rule / allowGuarded / serializedRule / tokensIn /
+    // tokensOut / llmModel / usingBYOK), which (a) bloated the modal so the
+    // mod had to scroll past a wall of disabled fields and (b) leaked
+    // implementation detail. Now we stash the whole compile under a
+    // 10-min Redis key (`composePending`) and only carry the short
+    // pendingId across the form chain — see compose-confirm-submit.
     const llmModel = await readOpenaiModel();
     const humanized = humanizeRule(validated);
     const cost = estimateTokenCost(llmModel, tokensIn, tokensOut);
+    const pendingId = newPendingId();
+    try {
+      // Atomic set + TTL via the `expiration` option (CodeRabbit #3 PR
+      // #49). The previous two-step `set` + `expire` could leak a
+      // TTL-less pending key if expire failed after set succeeded.
+      await redis.set(
+        keys.composePending(subredditName, pendingId),
+        JSON.stringify({ validated, tokensIn, tokensOut, llmModel, usingBYOK, originalRule: rule, allowGuarded }),
+        { expiration: new Date(Date.now() + 600_000) },
+      );
+    } catch (err) {
+      console.warn('[vibe-mod] submit: redis.set(composePending) threw:', describeErr(err));
+      return c.json<UiResponse>({
+        showToast: {
+          text: 'Plugin RPC unreachable — could not stage the compile for confirmation. Try again in a moment.',
+          appearance: 'neutral',
+        },
+      });
+    }
+
+    // Increment the daily compile counter HERE (right after a successful
+    // OpenAI compile + Redis stash) — NOT in the Save path. The previous
+    // version only counted on Save, which let a moderator drive arbitrary
+    // OpenAI cost by repeatedly compiling and cancelling out of the
+    // confirm form (CodeRabbit #5 PR #49). The token cost is real either
+    // way, so the quota should reflect it either way.
+    if (!usingBYOK) {
+      try {
+        await redis.set(todayCounterKey, String(todayCount + 1), {
+          expiration: new Date(Date.now() + 86_400_000),
+        });
+      } catch (err) {
+        console.warn('[vibe-mod] submit: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
+      }
+    }
     const summaryHeader = [
       `Rule name: ${validated.name}`,
       `Original sentence: "${validated.sourceNL}"`,
-      ``,
+      '',
       humanized,
-      ``,
+      '',
       `Compile cost: ${tokensIn} in / ${tokensOut} out tokens (~$${cost.toFixed(5)} on ${llmModel}).`,
     ].join('\n');
 
@@ -332,13 +373,13 @@ export function registerComposeRoutes(app: Hono): void {
         form: {
           title: `Confirm: "${validated.name}"`,
           description:
-            'Review the deterministic compile below. Save to keep this rule as a draft (with a 24h shadow period) and run a dry-run preview against recent posts. Tick "Edit instead" to go back and revise the English.',
+            'Review the deterministic compile below. Save to keep this rule as a draft (with a 24h shadow period) and run a dry-run preview against recent posts.',
           acceptLabel: 'Save + run dry-run preview',
           cancelLabel: 'Cancel',
           fields: [
             {
               name: 'compiledSummary',
-              label: 'Compiled rule (read-only)',
+              label: 'Compiled rule',
               type: 'paragraph',
               defaultValue: summaryHeader,
               disabled: true,
@@ -350,47 +391,15 @@ export function registerComposeRoutes(app: Hono): void {
               defaultValue: false,
               helpText: 'Tick to re-open the compose form with your original text pre-filled.',
             },
-            { name: 'rule', label: '(internal) original NL', type: 'paragraph', defaultValue: rule, disabled: true },
+            // Single short carrier — Devvit forms don't support hidden fields,
+            // so the smallest visible token (8-char id) is the best we can
+            // do. Used by /internal/form/compose-confirm-submit to look up
+            // the staged compile in Redis.
             {
-              name: 'allowGuarded',
-              label: '(internal) allowGuarded',
-              type: 'boolean',
-              defaultValue: !!allowGuarded,
-              disabled: true,
-            },
-            {
-              name: 'serializedRule',
-              label: '(internal) compiled rule JSON',
-              type: 'paragraph',
-              defaultValue: JSON.stringify(validated),
-              disabled: true,
-            },
-            {
-              name: 'tokensIn',
-              label: '(internal) tokensIn',
-              type: 'paragraph',
-              defaultValue: String(tokensIn),
-              disabled: true,
-            },
-            {
-              name: 'tokensOut',
-              label: '(internal) tokensOut',
-              type: 'paragraph',
-              defaultValue: String(tokensOut),
-              disabled: true,
-            },
-            {
-              name: 'llmModel',
-              label: '(internal) llmModel',
-              type: 'paragraph',
-              defaultValue: llmModel,
-              disabled: true,
-            },
-            {
-              name: 'usingBYOK',
-              label: '(internal) usingBYOK',
-              type: 'boolean',
-              defaultValue: usingBYOK,
+              name: 'pendingId',
+              label: '(internal session id, do not edit)',
+              type: 'string',
+              defaultValue: pendingId,
               disabled: true,
             },
           ],
@@ -400,7 +409,10 @@ export function registerComposeRoutes(app: Hono): void {
   });
 
   // Form: compose-confirm-submit — Save persists + schedules dry-run, Edit
-  // re-opens compose with the original NL pre-filled.
+  // re-opens compose with the original NL pre-filled. Only one piece of
+  // state crosses from compose: a short pendingId that points at a Redis
+  // entry we wrote in the previous step. Everything else (validated rule,
+  // tokens, model) is read back from there.
   app.post('/internal/form/compose-confirm-submit', async (c) => {
     if (!(await isCallerModerator())) {
       return c.json<UiResponse>({ showToast: { text: 'Only moderators can use this.', appearance: 'neutral' } });
@@ -409,31 +421,74 @@ export function registerComposeRoutes(app: Hono): void {
     const raw = await c.req.json<{
       compiledSummary?: string | string[];
       editInsteadOfSave?: boolean;
-      rule?: string | string[];
-      allowGuarded?: boolean;
-      serializedRule?: string | string[];
-      tokensIn?: string | string[];
-      tokensOut?: string | string[];
-      llmModel?: string | string[];
-      usingBYOK?: boolean;
+      pendingId?: string | string[];
     }>();
 
-    const rule = unwrapFormString(raw.rule);
-    const allowGuarded = !!raw.allowGuarded;
-    const serializedRule = unwrapFormString(raw.serializedRule);
-    const tokensIn = Math.max(0, Number.parseInt(unwrapFormString(raw.tokensIn), 10) || 0);
-    const tokensOut = Math.max(0, Number.parseInt(unwrapFormString(raw.tokensOut), 10) || 0);
-    const llmModel = unwrapFormString(raw.llmModel) || 'gpt-5.4-mini';
-    const usingBYOK = !!raw.usingBYOK;
+    const pendingId = unwrapFormString(raw.pendingId);
+    if (!pendingId) {
+      return c.json<UiResponse>({
+        showToast: {
+          text: 'Confirmation session expired or missing — please re-compile.',
+          appearance: 'neutral',
+        },
+      });
+    }
+
+    const subredditName = getCurrentSubredditName();
+    const pendingKey = keys.composePending(subredditName, pendingId);
+
+    // Atomic GET-then-DEL via WATCH/MULTI/EXEC (CodeRabbit #4 PR #49). The
+    // previous shape did a plain GET at the top and a DEL at the bottom,
+    // which left a window where two concurrent submits with the same
+    // pendingId (back-button + re-submit, double-click on Save, multi-tab
+    // moderator) could each read the entry and run the persistence flow,
+    // doubling the bundle write + dry-run schedule. The WATCH-checked
+    // EXEC means whichever call commits first wins; the loser sees a
+    // null result and surfaces the "session expired" toast.
+    let pending: ComposePending | null = null;
+    let pendingFoundButLost = false;
+    try {
+      const txn = await redis.watch(pendingKey);
+      const pendingJson = await redis.get(pendingKey);
+      if (pendingJson) {
+        await txn.multi();
+        await txn.del(pendingKey);
+        const result = await txn.exec();
+        if (result == null) {
+          // Another submitter raced us and consumed the entry first.
+          pendingFoundButLost = true;
+        } else {
+          pending = JSON.parse(pendingJson) as ComposePending;
+        }
+      } else {
+        try {
+          await txn.discard();
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (err) {
+      console.warn('[vibe-mod] confirm: redis.watch/get/del threw:', describeErr(err));
+    }
+    if (!pending) {
+      return c.json<UiResponse>({
+        showToast: {
+          text: pendingFoundButLost
+            ? 'Another submission consumed this confirmation. Please re-compile if you still want this rule.'
+            : 'Confirmation session expired (10 min TTL). Please re-compile to try again.',
+          appearance: 'neutral',
+        },
+      });
+    }
 
     if (raw.editInsteadOfSave) {
-      const subredditName = getCurrentSubredditName();
       let dailyCountDisplay = '—';
       try {
         dailyCountDisplay = String(Number((await redis.get(keys.compileCount(subredditName, todayKey()))) ?? '0'));
       } catch (err) {
         console.warn('[vibe-mod] confirm: redis.get(dailyCount) threw:', describeErr(err));
       }
+      // Pending entry was already consumed atomically above.
       return c.json<UiResponse>({
         showForm: {
           name: 'ruleComposerForm',
@@ -447,14 +502,14 @@ export function registerComposeRoutes(app: Hono): void {
                 name: 'rule',
                 label: 'Describe your rule in plain English (max 1000 characters)',
                 type: 'paragraph',
-                defaultValue: rule,
+                defaultValue: pending.originalRule,
                 helpText: 'Edit the sentence and re-compile.',
               },
               {
                 name: 'allowGuarded',
                 label: 'Allow this rule to ban/mute (otherwise removes only)',
                 type: 'boolean',
-                defaultValue: !!allowGuarded,
+                defaultValue: !!pending.allowGuarded,
                 helpText: ALLOW_GUARDED_HELP,
               },
             ],
@@ -463,9 +518,12 @@ export function registerComposeRoutes(app: Hono): void {
       });
     }
 
+    // Save branch — defence-in-depth re-validate (the redis entry could in
+    // principle have been tampered with, although the only writer is this
+    // very code path).
     let validated: RuleType;
     try {
-      validated = Rule.parse(JSON.parse(serializedRule));
+      validated = Rule.parse(pending.validated);
       checkTreeDepth(validated.when as Parameters<typeof checkTreeDepth>[0]);
       validatePredicateRegexes(validated.when as PredicateTreeShape);
     } catch (_err) {
@@ -477,25 +535,16 @@ export function registerComposeRoutes(app: Hono): void {
       });
     }
 
-    const subredditName = getCurrentSubredditName();
-    const todayCounterKey = keys.compileCount(subredditName, todayKey());
-    let todayCount = 0;
-    try {
-      todayCount = Number((await redis.get(todayCounterKey)) ?? '0');
-    } catch (err) {
-      console.warn('[vibe-mod] confirm: redis.get(todayCount) threw — skipping quota:', describeErr(err));
-    }
-
     const persistResult = await persistRuleAndStartDryRun({
       validated,
       subredditName,
-      tokensIn,
-      tokensOut,
-      llmModel,
-      usingBYOK,
-      todayCount,
-      todayCounterKey,
+      tokensIn: pending.tokensIn,
+      tokensOut: pending.tokensOut,
+      llmModel: pending.llmModel,
     });
+
+    // (pending entry already consumed atomically at the top of the
+    // handler via WATCH/MULTI/DEL, so we don't need a second DEL here.)
 
     if (persistResult.toast) {
       return c.json<UiResponse>({ showToast: persistResult.toast });
@@ -509,24 +558,48 @@ export function registerComposeRoutes(app: Hono): void {
   });
 }
 
+// Shape of the transient compile state stashed under
+// `keys.composePending(sub, pendingId)` between compose-rule-submit (which
+// writes it) and compose-confirm-submit (which reads + deletes it).
+// Phase 2c rework so the confirm modal carries one short id instead of
+// 7 disabled `(internal)` fields.
+interface ComposePending {
+  validated: RuleType;
+  tokensIn: number;
+  tokensOut: number;
+  llmModel: string;
+  usingBYOK: boolean;
+  originalRule: string;
+  allowGuarded: boolean;
+}
+
+// Crypto-random short id for the composePending Redis key. 12 chars of
+// hex is enough to make collisions astronomically unlikely (1 in 16^12),
+// while staying short enough that the disabled "(internal session id)"
+// field at the bottom of the confirm modal doesn't dominate the UI.
+function newPendingId(): string {
+  const bytes = new Uint8Array(6);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 // Persist a validated rule into the draft bundle and schedule a dry-run.
-// Private to this module — only compose-confirm-submit calls it.
+// Private to this module — only compose-confirm-submit calls it. The daily
+// quota counter has already been bumped at compile time (see
+// compose-rule-submit), so this helper no longer touches it.
 async function persistRuleAndStartDryRun(opts: {
   validated: RuleType;
   subredditName: string;
   tokensIn: number;
   tokensOut: number;
   llmModel: string;
-  usingBYOK: boolean;
-  todayCount: number;
-  todayCounterKey: string;
 }): Promise<{
   persisted: boolean;
   dryRunQueued: boolean;
   lines: string[];
   toast?: { text: string; appearance: 'neutral' | 'success' };
 }> {
-  const { validated, subredditName, tokensIn, tokensOut, llmModel, usingBYOK, todayCount, todayCounterKey } = opts;
+  const { validated, subredditName, tokensIn, tokensOut, llmModel } = opts;
 
   const draftKey = keys.rulesDraft(subredditName);
   let draftJson: string | undefined;
@@ -572,14 +645,10 @@ async function persistRuleAndStartDryRun(opts: {
     console.warn('[vibe-mod] persist: redis.set(draft) threw — rule NOT persisted:', describeErr(err));
   }
 
-  if (!usingBYOK) {
-    try {
-      await redis.set(todayCounterKey, String(todayCount + 1));
-      await redis.expire(todayCounterKey, 86_400);
-    } catch (err) {
-      console.warn('[vibe-mod] persist: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
-    }
-  }
+  // (Daily compile counter is incremented in compose-rule-submit, right
+  // after the OpenAI call returns — not here. The token cost is real
+  // regardless of whether the moderator clicks Save or Cancel on the
+  // confirm form, so the quota must reflect that. CodeRabbit #5 PR #49.)
 
   let dryRunQueued = true;
   try {
@@ -596,15 +665,20 @@ async function persistRuleAndStartDryRun(opts: {
   // RuleBundle's strict schema accepts the partial we built; coerce safely.
   void RuleBundle; // mark used for tree-shaking awareness
 
-  const summary = summarizeRule(validated);
-  const lines = [`Compiled rule "${validated.name}". ${summary}.`];
+  // Phase 2c demo-recording UX clean-up — Devvit toasts truncate at ~120
+  // chars, so the previous 4-clause line ('Compiled rule "X". → trigger:
+  // action. Dry-run started — open ⋯ menu → "vibe-mod: View rules + log"
+  // to see preview.') was getting cut off mid-sentence in the recording.
+  // The compose-confirm form already showed the full humanizeRule output
+  // and the rule-name detail, so the toast just needs to confirm what
+  // actually happened.
+  let line: string;
   if (persisted && dryRunQueued) {
-    lines.push('Dry-run started — open the subreddit ⋯ menu → "vibe-mod: View rules + log" to see preview.');
+    line = `Saved "${validated.name}". Dry-run starts now.`;
   } else if (persisted) {
-    lines.push('Saved as draft. Open the subreddit ⋯ menu → "vibe-mod: View rules + log".');
+    line = `Saved "${validated.name}" as draft (dry-run unavailable).`;
   } else {
-    lines.push('Rule compiled but not persisted — plugin RPC unreachable (reddit/devvit#258).');
+    line = `Compiled but not persisted — plugin RPC unreachable.`;
   }
-
-  return { persisted, dryRunQueued, lines };
+  return { persisted, dryRunQueued, lines: [line] };
 }

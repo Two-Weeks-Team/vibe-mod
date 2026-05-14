@@ -39,6 +39,19 @@ ROOT = Path(__file__).resolve().parent.parent
 AUTH_DIR = ROOT / "playwright" / ".auth"
 STATE = AUTH_DIR / "reddit-com.json"
 HEADLESS = os.environ.get("HEADLESS", "1") == "1"
+FULLSCREEN = os.environ.get("FULLSCREEN", "0") == "1"
+def _safe_int(env_name: str, default: int) -> int:
+    """Parse an int env var; on garbage input fall back to the default
+    rather than crashing the recording session (CodeRabbit #2 PR #49)."""
+    raw = os.environ.get(env_name, str(default))
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        print(f"[verify] WARN: {env_name}={raw!r} is not an int — using default {default}")
+        return default
+
+
+SLOW_MO = _safe_int("SLOW_MO", 0)  # ms between actions, 0 = no slow-down
 SUB = os.environ.get("REDDIT_SUB", "SocialSeeding")
 # Ambiguous input designed to trigger the clarify path on the first compile.
 COMPOSE_INPUT = os.environ.get(
@@ -236,19 +249,34 @@ async def main() -> None:
     report = RunReport(sub=SUB, input=COMPOSE_INPUT)
 
     async with async_playwright() as p:
+        launch_args = ["--disable-blink-features=AutomationControlled"]
+        if FULLSCREEN:
+            # macOS-friendly recording mode: `--start-maximized` opens the
+            # Chrome window at the user's full screen size (with the address
+            # bar visible — useful for "this is reddit.com" demo context).
+            # Pair with `no_viewport=True` so the page matches the window
+            # exactly, and let Retina DPR happen naturally for sharp text.
+            # `--start-fullscreen` is unreliable on macOS through Playwright
+            # (frequently ignored) and `--kiosk` hides the URL bar.
+            launch_args += ["--start-maximized"]
         browser = await p.chromium.launch(
             headless=HEADLESS,
-            args=["--disable-blink-features=AutomationControlled"],
+            slow_mo=SLOW_MO,
+            args=launch_args,
         )
-        ctx = await browser.new_context(
+        ctx_kwargs = dict(
             storage_state=str(STATE),
-            viewport={"width": 1600, "height": 1000},
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
             ),
             locale="en-US",
         )
+        if FULLSCREEN:
+            ctx_kwargs["no_viewport"] = True  # let the page match the maximized window
+        else:
+            ctx_kwargs["viewport"] = {"width": 1600, "height": 1000}
+        ctx = await browser.new_context(**ctx_kwargs)
         page = await ctx.new_page()
 
         async def shot(name: str) -> str:
@@ -311,16 +339,14 @@ async def main() -> None:
             extra={"form": clarify_form, "round_visible": round_visible},
         ))
 
-        if not clarify_pass:
-            # The model didn't ask for clarification on this input — the
-            # Confirm form should have opened directly. Fall through to
-            # confirm-form check.
-            print(f"[verify] no clarify modal — assuming confirm path.")
-        else:
-            # Pick a suggested option via direct DOM mutation (the Devvit
-            # `faceplate-select` Lit element doesn't respond to a vanilla
-            # locator.click, but assigning .value + dispatching change/input
-            # events drives the same code path the human click would).
+        # Multi-round clarify loop — if the LLM asks again after our first
+        # answer, pick another option and re-compile, up to MAX_CLARIFY_TURNS.
+        # Devvit caps at MAX_CLARIFY_TURNS=3 server-side so we'll bottom out
+        # one way or another.
+        clarify_rounds_handled = 0
+        while clarify_pass and clarify_rounds_handled < 3:
+            clarify_rounds_handled += 1
+            print(f"[verify] handling clarify round #{clarify_rounds_handled}")
             picker_result = {}
             try:
                 picker_result = await page.evaluate(
@@ -375,29 +401,33 @@ async def main() -> None:
             except Exception as e:
                 picker_result = {"ok": False, "exception": str(e)}
 
+            # Only the first picker iteration counts toward the official
+            # `clarify-select-pick` step — later rounds get suffixed names
+            # so the report.overall() check stays meaningful.
+            step_name = "clarify-select-pick" if clarify_rounds_handled == 1 else f"clarify-select-pick-r{clarify_rounds_handled}"
             report.add(StepResult(
-                "clarify-select-pick",
+                step_name,
                 bool(picker_result.get('ok')),
                 f"picked={picker_result.get('picked')} controls_seen={len(picker_result.get('found', []))} opts_seen={len(picker_result.get('opts', []))}",
                 extra={"picker": picker_result},
             ))
 
-            # Mark PASS when we successfully drove some select-like control.
-            # The form's defaultValue already pre-selects opts[0], so even
-            # if our picker only reaffirmed it the next compile will see
-            # this value — that's still a real round-trip.
-            if 'clarify-select-pick' not in {s.name for s in report.steps}:
-                report.add(StepResult(
-                    "clarify-select-pick",
-                    bool(picker_ok),
-                    f"picker_ok={picker_ok} picked_value={picked_val!r}",
-                ))
-
-            await shot("05-clarify-picked")
+            await shot(f"05-clarify-r{clarify_rounds_handled}-picked")
             recompiled = await submit_form(page, r"recompile|re-compile|compile")
-            report.add(StepResult("clarify-recompile-submit", recompiled, "clicked Re-compile"))
+            recompile_step = "clarify-recompile-submit" if clarify_rounds_handled == 1 else f"clarify-recompile-submit-r{clarify_rounds_handled}"
+            report.add(StepResult(recompile_step, recompiled, "clicked Re-compile"))
             await page.wait_for_timeout(8_000)
-            await shot("06-after-recompile")
+            await shot(f"06-after-recompile-r{clarify_rounds_handled}")
+
+            # Re-dump the form so the loop condition reflects what came
+            # back. If the LLM is satisfied, the next form is the Confirm
+            # form and clarify_pass flips to False, breaking the loop.
+            clarify_form = await dump_form(page)
+            field_names = {f.get('name', '') for f in clarify_form.get('fields', [])}
+            still_clarify = 'clarificationTurn' in field_names
+            still_select = any('select' in (f.get('type') or '') for f in clarify_form.get('fields', []))
+            clarify_pass = still_clarify and still_select
+            print(f"[verify]   round #{clarify_rounds_handled} done. still_clarify={still_clarify}")
 
         # ── 4 · expect Confirm form ─────────────────────────────────────
         confirm_form = await dump_form(page)

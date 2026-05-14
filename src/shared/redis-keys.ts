@@ -53,6 +53,17 @@ export const keys = {
 
   /** "1" if the moderator dismissed the dashboard onboarding intro for this sub. */
   onboardingDismissed: (sub: string) => `${sub}:onboarding:dismissed`,
+
+  /**
+   * Transient state for the 2-step compose flow (Phase 2c UX clean-up):
+   * compose-rule-submit stores the validated rule + tokens + model under
+   * this key, then composeConfirmForm only carries the short pendingId so
+   * the modal stays clean (prior version surfaced 7 internal carrier
+   * fields). compose-confirm-submit reads + DELs the entry. 10 min TTL
+   * caps abandoned compiles; the moderator's daily compile counter has
+   * already been bumped, so a stale pending is just wasted tokens.
+   */
+  composePending: (sub: string, id: string) => `${sub}:compose:pending:${id}`,
 } as const;
 
 /** Global keys that are NOT subreddit-scoped (rare). */
