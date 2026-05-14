@@ -40,7 +40,12 @@ export interface FakeRedis {
 export interface FakeTxn {
   multi: () => Promise<void>;
   discard: () => Promise<void>;
-  exec: () => Promise<void>;
+  // Real Devvit Redis returns an array of per-command results on success and
+  // `null` when WATCH detected a concurrent modification (matching ioredis /
+  // node-redis MULTI/EXEC semantics). Mirror that so production code that
+  // checks `result == null` to detect a contended write doesn't get a false
+  // abort signal in tests.
+  exec: () => Promise<unknown[] | null>;
   get: (k: string) => Promise<string | undefined>;
   set: (k: string, v: string) => Promise<void>;
   expire: (k: string, ttl: number) => Promise<void>;
@@ -106,10 +111,14 @@ export function makeFakeRedis(): FakeRedis {
     },
   };
 
-  const watch = async (_k: string): Promise<FakeTxn> => ({
+  const watch = async (..._keys: string[]): Promise<FakeTxn> => ({
     multi: async () => {},
     discard: async () => {},
-    exec: async () => {},
+    // No concurrent-modification simulation in the fake — every exec succeeds
+    // with an empty result array (mirroring real Redis "no per-command
+    // results to report"). Tests that need to assert WATCH abort behaviour
+    // can override this on a per-call basis with vi.spyOn.
+    exec: async () => [],
     get: base.get,
     set: base.set,
     expire: base.expire,
