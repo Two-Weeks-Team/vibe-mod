@@ -325,11 +325,14 @@ export function registerComposeRoutes(app: Hono): void {
     const cost = estimateTokenCost(llmModel, tokensIn, tokensOut);
     const pendingId = newPendingId();
     try {
+      // Atomic set + TTL via the `expiration` option (CodeRabbit #3 PR
+      // #49). The previous two-step `set` + `expire` could leak a
+      // TTL-less pending key if expire failed after set succeeded.
       await redis.set(
         keys.composePending(subredditName, pendingId),
         JSON.stringify({ validated, tokensIn, tokensOut, llmModel, usingBYOK, originalRule: rule, allowGuarded }),
+        { expiration: new Date(Date.now() + 600_000) },
       );
-      await redis.expire(keys.composePending(subredditName, pendingId), 600);
     } catch (err) {
       console.warn('[vibe-mod] submit: redis.set(composePending) threw:', describeErr(err));
       return c.json<UiResponse>({
@@ -338,6 +341,22 @@ export function registerComposeRoutes(app: Hono): void {
           appearance: 'neutral',
         },
       });
+    }
+
+    // Increment the daily compile counter HERE (right after a successful
+    // OpenAI compile + Redis stash) — NOT in the Save path. The previous
+    // version only counted on Save, which let a moderator drive arbitrary
+    // OpenAI cost by repeatedly compiling and cancelling out of the
+    // confirm form (CodeRabbit #5 PR #49). The token cost is real either
+    // way, so the quota should reflect it either way.
+    if (!usingBYOK) {
+      try {
+        await redis.set(todayCounterKey, String(todayCount + 1), {
+          expiration: new Date(Date.now() + 86_400_000),
+        });
+      } catch (err) {
+        console.warn('[vibe-mod] submit: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
+      }
     }
     const summaryHeader = [
       `Rule name: ${validated.name}`,
@@ -416,17 +435,47 @@ export function registerComposeRoutes(app: Hono): void {
     }
 
     const subredditName = getCurrentSubredditName();
+    const pendingKey = keys.composePending(subredditName, pendingId);
+
+    // Atomic GET-then-DEL via WATCH/MULTI/EXEC (CodeRabbit #4 PR #49). The
+    // previous shape did a plain GET at the top and a DEL at the bottom,
+    // which left a window where two concurrent submits with the same
+    // pendingId (back-button + re-submit, double-click on Save, multi-tab
+    // moderator) could each read the entry and run the persistence flow,
+    // doubling the bundle write + dry-run schedule. The WATCH-checked
+    // EXEC means whichever call commits first wins; the loser sees a
+    // null result and surfaces the "session expired" toast.
     let pending: ComposePending | null = null;
+    let pendingFoundButLost = false;
     try {
-      const pendingJson = await redis.get(keys.composePending(subredditName, pendingId));
-      if (pendingJson) pending = JSON.parse(pendingJson) as ComposePending;
+      const txn = await redis.watch(pendingKey);
+      const pendingJson = await redis.get(pendingKey);
+      if (pendingJson) {
+        await txn.multi();
+        await txn.del(pendingKey);
+        const result = await txn.exec();
+        if (result == null) {
+          // Another submitter raced us and consumed the entry first.
+          pendingFoundButLost = true;
+        } else {
+          pending = JSON.parse(pendingJson) as ComposePending;
+        }
+      } else {
+        try {
+          await txn.discard();
+        } catch {
+          /* ignore */
+        }
+      }
     } catch (err) {
-      console.warn('[vibe-mod] confirm: redis.get(composePending) threw:', describeErr(err));
+      console.warn('[vibe-mod] confirm: redis.watch/get/del threw:', describeErr(err));
     }
     if (!pending) {
       return c.json<UiResponse>({
         showToast: {
-          text: 'Confirmation session expired (10 min TTL). Please re-compile to try again.',
+          text: pendingFoundButLost
+            ? 'Another submission consumed this confirmation. Please re-compile if you still want this rule.'
+            : 'Confirmation session expired (10 min TTL). Please re-compile to try again.',
           appearance: 'neutral',
         },
       });
@@ -439,12 +488,7 @@ export function registerComposeRoutes(app: Hono): void {
       } catch (err) {
         console.warn('[vibe-mod] confirm: redis.get(dailyCount) threw:', describeErr(err));
       }
-      // Edit branch — drop the pending entry and re-open compose pre-filled.
-      try {
-        await redis.del(keys.composePending(subredditName, pendingId));
-      } catch (err) {
-        console.warn('[vibe-mod] confirm: redis.del(composePending) threw — TTL will reap:', describeErr(err));
-      }
+      // Pending entry was already consumed atomically above.
       return c.json<UiResponse>({
         showForm: {
           name: 'ruleComposerForm',
@@ -491,32 +535,16 @@ export function registerComposeRoutes(app: Hono): void {
       });
     }
 
-    const todayCounterKey = keys.compileCount(subredditName, todayKey());
-    let todayCount = 0;
-    try {
-      todayCount = Number((await redis.get(todayCounterKey)) ?? '0');
-    } catch (err) {
-      console.warn('[vibe-mod] confirm: redis.get(todayCount) threw — skipping quota:', describeErr(err));
-    }
-
     const persistResult = await persistRuleAndStartDryRun({
       validated,
       subredditName,
       tokensIn: pending.tokensIn,
       tokensOut: pending.tokensOut,
       llmModel: pending.llmModel,
-      usingBYOK: pending.usingBYOK,
-      todayCount,
-      todayCounterKey,
     });
 
-    // Consume the pending entry once it's safely persisted (or recorded the
-    // failure into the bundle).
-    try {
-      await redis.del(keys.composePending(subredditName, pendingId));
-    } catch (err) {
-      console.warn('[vibe-mod] confirm: redis.del(composePending) threw — TTL will reap:', describeErr(err));
-    }
+    // (pending entry already consumed atomically at the top of the
+    // handler via WATCH/MULTI/DEL, so we don't need a second DEL here.)
 
     if (persistResult.toast) {
       return c.json<UiResponse>({ showToast: persistResult.toast });
@@ -556,23 +584,22 @@ function newPendingId(): string {
 }
 
 // Persist a validated rule into the draft bundle and schedule a dry-run.
-// Private to this module — only compose-confirm-submit calls it.
+// Private to this module — only compose-confirm-submit calls it. The daily
+// quota counter has already been bumped at compile time (see
+// compose-rule-submit), so this helper no longer touches it.
 async function persistRuleAndStartDryRun(opts: {
   validated: RuleType;
   subredditName: string;
   tokensIn: number;
   tokensOut: number;
   llmModel: string;
-  usingBYOK: boolean;
-  todayCount: number;
-  todayCounterKey: string;
 }): Promise<{
   persisted: boolean;
   dryRunQueued: boolean;
   lines: string[];
   toast?: { text: string; appearance: 'neutral' | 'success' };
 }> {
-  const { validated, subredditName, tokensIn, tokensOut, llmModel, usingBYOK, todayCount, todayCounterKey } = opts;
+  const { validated, subredditName, tokensIn, tokensOut, llmModel } = opts;
 
   const draftKey = keys.rulesDraft(subredditName);
   let draftJson: string | undefined;
@@ -618,14 +645,10 @@ async function persistRuleAndStartDryRun(opts: {
     console.warn('[vibe-mod] persist: redis.set(draft) threw — rule NOT persisted:', describeErr(err));
   }
 
-  if (!usingBYOK) {
-    try {
-      await redis.set(todayCounterKey, String(todayCount + 1));
-      await redis.expire(todayCounterKey, 86_400);
-    } catch (err) {
-      console.warn('[vibe-mod] persist: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
-    }
-  }
+  // (Daily compile counter is incremented in compose-rule-submit, right
+  // after the OpenAI call returns — not here. The token cost is real
+  // regardless of whether the moderator clicks Save or Cancel on the
+  // confirm form, so the quota must reflect that. CodeRabbit #5 PR #49.)
 
   let dryRunQueued = true;
   try {

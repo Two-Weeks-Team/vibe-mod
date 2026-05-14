@@ -40,7 +40,18 @@ AUTH_DIR = ROOT / "playwright" / ".auth"
 STATE = AUTH_DIR / "reddit-com.json"
 HEADLESS = os.environ.get("HEADLESS", "1") == "1"
 FULLSCREEN = os.environ.get("FULLSCREEN", "0") == "1"
-SLOW_MO = int(os.environ.get("SLOW_MO", "0"))  # ms between actions, 0 = no slow-down
+def _safe_int(env_name: str, default: int) -> int:
+    """Parse an int env var; on garbage input fall back to the default
+    rather than crashing the recording session (CodeRabbit #2 PR #49)."""
+    raw = os.environ.get(env_name, str(default))
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        print(f"[verify] WARN: {env_name}={raw!r} is not an int — using default {default}")
+        return default
+
+
+SLOW_MO = _safe_int("SLOW_MO", 0)  # ms between actions, 0 = no slow-down
 SUB = os.environ.get("REDDIT_SUB", "SocialSeeding")
 # Ambiguous input designed to trigger the clarify path on the first compile.
 COMPOSE_INPUT = os.environ.get(
