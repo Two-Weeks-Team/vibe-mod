@@ -1,0 +1,48 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="leaf" x1="0.1" y1="0.05" x2="0.85" y2="0.95">
+      <stop offset="0" stop-color="#15B181"/>
+      <stop offset="1" stop-color="#009E69"/>
+    </linearGradient>
+  </defs>
+
+  <!-- STEM: gentle S-curve, tapering toward base -->
+  <path fill="url(#leaf)" d="
+    M256 300
+    C 246 300 240 306 240 318
+    C 238 348 250 372 258 398
+    C 266 424 268 452 264 482
+    C 263 489 257 491 252 489
+    C 245 487 243 480 244 472
+    C 248 446 246 422 238 398
+    C 230 372 220 348 222 316
+    C 224 300 240 290 256 290
+    C 264 290 268 294 268 300
+    C 268 304 262 300 256 300 Z"/>
+
+  <!-- RIGHT LEAF with crescent vein cut-out (evenodd) -->
+  <path fill="url(#leaf)" fill-rule="evenodd" d="
+    M250 312
+    C 252 244 270 176 322 134
+    C 356 106 398 96 432 100
+    C 436 132 430 188 402 232
+    C 372 280 318 312 282 320
+    C 268 322 252 322 250 312 Z
+    M298 286
+    C 326 268 360 218 392 158
+    C 372 214 342 264 304 290
+    C 300 292 296 290 298 286 Z"/>
+
+  <!-- LEFT LEAF (mirror of right around x=256) -->
+  <path fill="url(#leaf)" fill-rule="evenodd" d="
+    M262 312
+    C 260 244 242 176 190 134
+    C 156 106 114 96 80 100
+    C 76 132 82 188 110 232
+    C 140 280 194 312 230 320
+    C 244 322 260 322 262 312 Z
+    M214 286
+    C 186 268 152 218 120 158
+    C 140 214 170 264 208 290
+    C 212 292 216 290 214 286 Z"/>
+</svg>
