@@ -50,6 +50,9 @@ export const keys = {
 
   /** Trigger-dedupe sentinel: this {trigger, thingId} pair was already handled. */
   seen: (sub: string, trigger: string, thingId: string) => `${sub}:seen:${trigger}:${thingId}`,
+
+  /** "1" if the moderator dismissed the dashboard onboarding intro for this sub. */
+  onboardingDismissed: (sub: string) => `${sub}:onboarding:dismissed`,
 } as const;
 
 /** Global keys that are NOT subreddit-scoped (rare). */
