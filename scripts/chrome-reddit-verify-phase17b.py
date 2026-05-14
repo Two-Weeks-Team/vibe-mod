@@ -135,21 +135,27 @@ async def click_overflow_menu_item(page: Page, label: str) -> bool:
 
 async def dump_form(page: Page) -> dict:
     """Snapshot the visible Devvit form (faceplate-form). Returns shape:
-      { title, description, fields: [{name, type, defaultValue, options}] }
+      { title, description, dialogText, fields: [{name, type, defaultValue, options}] }
+    Devvit's modal markup doesn't expose a stable `<h2>` for the title or
+    `[slot="description"]`, so the test logic prefers `dialogText` (full
+    dialog text-content) + field-name signals over the formal title/desc.
     """
     return await page.evaluate(
         """() => {
           const form = document.querySelector('faceplate-form');
           if (!form) return { error: 'no faceplate-form' };
-          const out = { title: '', description: '', acceptLabel: '', cancelLabel: '', fields: [] };
-          // Best-effort title/description extraction — Devvit renders these as
-          // h2/p inside the modal.
-          const root = form.closest('faceplate-dialog') || form.parentElement;
+          const out = { title: '', description: '', dialogText: '', acceptLabel: '', cancelLabel: '', fields: [] };
+          const root = form.closest('faceplate-dialog') || form.closest('shreddit-dialog') || form.parentElement;
           if (root) {
-            const h2 = root.querySelector('h2');
-            if (h2) out.title = h2.innerText.trim();
-            const desc = root.querySelector('[slot="description"], .description, p');
-            if (desc) out.description = desc.innerText.trim().slice(0, 600);
+            // Best-effort title — try a handful of common selectors.
+            const h2 = root.querySelector('h2, [slot="title"], [data-testid="dialog-title"]');
+            if (h2) out.title = (h2.innerText || h2.textContent || '').trim();
+            const desc = root.querySelector('[slot="description"], .description');
+            if (desc) out.description = (desc.innerText || desc.textContent || '').trim().slice(0, 600);
+            // Always capture the full dialog text — onboarding cards / token
+            // cost lines / "Welcome" greetings show up here even when there's
+            // no formal description slot.
+            out.dialogText = (root.innerText || root.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 2000);
             const accept = root.querySelector('button[type="submit"], [data-form-accept], faceplate-button[type="submit"]');
             if (accept) out.acceptLabel = (accept.innerText || accept.textContent || '').trim();
             const cancel = root.querySelectorAll('button, faceplate-button');
@@ -287,44 +293,105 @@ async def main() -> None:
         await shot("04-after-submit")
 
         # ── 3 · expect Clarify (with select field) ──────────────────────
-        title = (clarify_form.get('title') or '').lower()
-        is_clarify = 'clarify' in title or 'round' in (clarify_form.get('description') or '').lower()
+        # Devvit doesn't expose a stable title node, so detect by field-name
+        # signals: clarificationTurn (state-carrier added by Phase 1.7b) is
+        # present iff the server returned the clarify modal.
+        field_names = {f.get('name', '') for f in clarify_form.get('fields', [])}
+        is_clarify = 'clarificationTurn' in field_names
         select_fields = [f for f in clarify_form.get('fields', []) if 'select' in (f.get('type') or '')]
         clarify_pass = is_clarify and len(select_fields) > 0
+        # Bonus: the dialog text should contain the "(Round X of N)" prefix
+        # from the prompt.
+        dlg = (clarify_form.get('dialogText') or '').lower()
+        round_visible = 'round' in dlg and 'of' in dlg
         report.add(StepResult(
             "clarify-renders-select",
             clarify_pass,
-            f"is_clarify={is_clarify} select_fields={[f['name'] for f in select_fields]} all_fields={[f['name'] for f in clarify_form.get('fields', [])]}",
-            extra={"form": clarify_form},
+            f"is_clarify={is_clarify} select_fields={[f['name'] for f in select_fields]} round_visible={round_visible}",
+            extra={"form": clarify_form, "round_visible": round_visible},
         ))
 
         if not clarify_pass:
             # The model didn't ask for clarification on this input — the
             # Confirm form should have opened directly. Fall through to
             # confirm-form check.
-            print(f"[verify] no clarify modal — assuming confirm path. title={title!r}")
+            print(f"[verify] no clarify modal — assuming confirm path.")
         else:
-            # Pick the first option in the select, then Re-compile.
+            # Pick a suggested option via direct DOM mutation (the Devvit
+            # `faceplate-select` Lit element doesn't respond to a vanilla
+            # locator.click, but assigning .value + dispatching change/input
+            # events drives the same code path the human click would).
+            picker_result = {}
             try:
-                select = page.locator('faceplate-form').first.locator('select, faceplate-select').first
-                await select.click(timeout=3_000)
-                await page.wait_for_timeout(500)
-                # Pick the first non-default value.
-                opts = select_fields[0].get('options', [])
-                if len(opts) > 0:
-                    await page.evaluate(
-                        """val => {
-                          const sel = document.querySelector('faceplate-form select, faceplate-form faceplate-select');
-                          if (!sel) return false;
-                          if (sel.tagName === 'SELECT') sel.value = val;
-                          else sel.setAttribute('value', val);
-                          sel.dispatchEvent(new Event('change', { bubbles: true }));
-                          return true;
-                        }""",
-                        opts[0]['value'],
-                    )
+                picker_result = await page.evaluate(
+                    """() => {
+                      const form = document.querySelector('faceplate-form');
+                      if (!form) return { ok: false, reason: 'no faceplate-form' };
+                      // Find the named clarificationAnswer wrapper, then any
+                      // control inside it.
+                      const wrap = form.querySelector('[data-field-name="clarificationAnswer"], faceplate-form-field[name="clarificationAnswer"], [name="clarificationAnswer"]');
+                      const inspect = (el) => ({
+                        tag: el.tagName.toLowerCase(),
+                        name: el.getAttribute('name') || '',
+                        role: el.getAttribute('role') || '',
+                        valueAttr: el.getAttribute('value') || '',
+                        valueProp: el.value !== undefined ? String(el.value) : '',
+                      });
+                      const found = [];
+                      // Scan inside the wrap (or form root if wrap not found)
+                      // for ANY interactive control.
+                      const scope = wrap || form;
+                      const ctls = scope.querySelectorAll('select, faceplate-select, faceplate-radio-group, faceplate-listbox-button, [role="combobox"], [role="listbox"], [role="radiogroup"], button, faceplate-radio-input');
+                      for (const c of ctls) found.push(inspect(c));
+                      // Also list any visible options in the document (Devvit may
+                      // render them as siblings of the select once expanded).
+                      const opts = [...document.querySelectorAll('option, faceplate-listbox-item, faceplate-radio-input, [role="option"]')]
+                        .map(o => ({ tag: o.tagName.toLowerCase(), text: (o.textContent || '').trim().slice(0, 60), value: o.getAttribute('value') || '' }));
+                      // Attempt 1 — pick the SECOND option of the first
+                      // matching native <select>, falling back to the first.
+                      let picked = null;
+                      const native = scope.querySelector('select');
+                      if (native) {
+                        const options = [...native.querySelectorAll('option')];
+                        if (options.length > 0) {
+                          const target = options[options.length > 1 ? 1 : 0];
+                          native.value = target.value;
+                          native.dispatchEvent(new Event('input', { bubbles: true }));
+                          native.dispatchEvent(new Event('change', { bubbles: true }));
+                          picked = { method: 'native-select', value: target.value, text: (target.textContent || '').trim() };
+                        }
+                      }
+                      // Attempt 2 — radio-group / listbox: click the first option-like child.
+                      if (!picked) {
+                        const opt = scope.querySelector('faceplate-radio-input, faceplate-listbox-item, [role="option"]');
+                        if (opt) {
+                          opt.click();
+                          picked = { method: 'option-click', value: opt.getAttribute('value') || '', text: (opt.textContent || '').trim() };
+                        }
+                      }
+                      return { ok: !!picked, picked, found, opts: opts.slice(0, 8) };
+                    }"""
+                )
             except Exception as e:
-                report.add(StepResult("clarify-select-pick", False, f"exception: {e}"))
+                picker_result = {"ok": False, "exception": str(e)}
+
+            report.add(StepResult(
+                "clarify-select-pick",
+                bool(picker_result.get('ok')),
+                f"picked={picker_result.get('picked')} controls_seen={len(picker_result.get('found', []))} opts_seen={len(picker_result.get('opts', []))}",
+                extra={"picker": picker_result},
+            ))
+
+            # Mark PASS when we successfully drove some select-like control.
+            # The form's defaultValue already pre-selects opts[0], so even
+            # if our picker only reaffirmed it the next compile will see
+            # this value — that's still a real round-trip.
+            if 'clarify-select-pick' not in {s.name for s in report.steps}:
+                report.add(StepResult(
+                    "clarify-select-pick",
+                    bool(picker_ok),
+                    f"picker_ok={picker_ok} picked_value={picked_val!r}",
+                ))
 
             await shot("05-clarify-picked")
             recompiled = await submit_form(page, r"recompile|re-compile|compile")
@@ -334,14 +401,12 @@ async def main() -> None:
 
         # ── 4 · expect Confirm form ─────────────────────────────────────
         confirm_form = await dump_form(page)
-        title = (confirm_form.get('title') or '').lower()
-        is_confirm = 'confirm' in title or any(
-            'compiledsummary' in (f.get('name') or '').lower() for f in confirm_form.get('fields', [])
-        )
+        confirm_fields = {f.get('name', '') for f in confirm_form.get('fields', [])}
+        is_confirm = 'compiledSummary' in confirm_fields and 'serializedRule' in confirm_fields
         report.add(StepResult(
             "confirm-form-renders",
             is_confirm,
-            f"title={title!r} fields={[f['name'] for f in confirm_form.get('fields', [])]}",
+            f"compiledSummary+serializedRule present? {is_confirm}; fields={list(confirm_fields)}",
             await shot("07-confirm-form"),
             {"form": confirm_form},
         ))
@@ -369,14 +434,26 @@ async def main() -> None:
         if ok2:
             await page.locator('faceplate-form').first.wait_for(state="visible", timeout=10_000)
             dash_form = await dump_form(page)
-            desc = dash_form.get('description') or ''
-            has_onboarding = 'welcome to vibe-mod' in desc.lower() or '3 quick steps' in desc.lower()
-            has_token_cost = 'tokens used' in desc.lower() and 'on gpt' in desc.lower()
-            report.add(StepResult("dashboard-onboarding-or-empty", has_onboarding or 'no rules' in desc.lower(),
-                                   f"onboarding={has_onboarding} desc_head={desc[:120]!r}",
-                                   await shot("10-dashboard-form"), {"form": dash_form}))
-            report.add(StepResult("dashboard-token-cost", has_token_cost,
-                                   f"token_line_present={has_token_cost}", extra={"desc": desc[:600]}))
+            # Devvit puts the description into the dialog body text, not into
+            # any single labelled element. Use dialogText (full text content
+            # of the dialog) as the source of truth.
+            dlg_text = (dash_form.get('dialogText') or '').lower()
+            has_onboarding = 'welcome to vibe-mod' in dlg_text or '3 quick steps' in dlg_text
+            has_empty_state = 'no rules yet' in dlg_text
+            has_token_cost = 'tokens used' in dlg_text and ('gpt-5.4' in dlg_text or 'gpt-5' in dlg_text)
+            report.add(StepResult(
+                "dashboard-onboarding-or-empty",
+                has_onboarding or has_empty_state,
+                f"onboarding={has_onboarding} empty_state={has_empty_state}",
+                await shot("10-dashboard-form"),
+                {"form": dash_form},
+            ))
+            report.add(StepResult(
+                "dashboard-token-cost",
+                has_token_cost,
+                f"token_line_present={has_token_cost}",
+                extra={"dlg_excerpt": dlg_text[:600]},
+            ))
 
         # ── 6 · Manage rules menu ──────────────────────────────────────
         try:
