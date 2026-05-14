@@ -48,6 +48,7 @@ export interface FakeTxn {
   exec: () => Promise<unknown[] | null>;
   get: (k: string) => Promise<string | undefined>;
   set: (k: string, v: string) => Promise<void>;
+  del: (k: string) => Promise<void>;
   expire: (k: string, ttl: number) => Promise<void>;
   hSet: (k: string, fields: Record<string, string>) => Promise<void>;
   zAdd: (k: string, entry: { member: string; score: number }) => Promise<void>;
@@ -121,6 +122,7 @@ export function makeFakeRedis(): FakeRedis {
     exec: async () => [],
     get: base.get,
     set: base.set,
+    del: base.del,
     expire: base.expire,
     hSet: base.hSet,
     zAdd: base.zAdd,
