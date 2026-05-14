@@ -13,9 +13,11 @@
 // round-trips) still need `npm run dev` against a playtest sub — those are noted
 // as MANUAL at the end and are not auto-asserted here.
 
+import * as fs from 'node:fs';
 import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import * as path from 'node:path';
 import { dirname, join } from 'node:path';
 import { FactPaths, SAFE_ACTIONS, GUARDED_ACTIONS } from '../src/shared/rule-schema';
 import { VIBE_MOD_SYSTEM_PROMPT, FEW_SHOT_EXAMPLES } from '../src/shared/system-prompt';
@@ -45,9 +47,25 @@ const pkg = JSON.parse(read('package.json')) as {
   dependencies: Record<string, string>;
   scripts: Record<string, string>;
 };
-const indexTs = read('src/server/index.ts');
+// Concatenate every .ts file under src/server/ so the route-defined check
+// works after Phase 2b's module split (handlers moved out of index.ts into
+// src/server/routes/*.ts and src/server/helpers/*.ts).
+const serverTs = (() => {
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name);
+      const stat = fs.statSync(full);
+      if (stat.isDirectory()) walk(full);
+      else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) files.push(full);
+    }
+  };
+  walk(path.resolve(ROOT, 'src/server'));
+  return files.map((f) => fs.readFileSync(f, 'utf8')).join('\n\n//── file boundary ──//\n\n');
+})();
+const indexTs = serverTs; // legacy alias — older checks still reference it
 
-const routeDefined = (path: string) => indexTs.includes(`'${path}'`) || indexTs.includes(`"${path}"`);
+const routeDefined = (path: string) => serverTs.includes(`'${path}'`) || serverTs.includes(`"${path}"`);
 
 // ── Gate 1 — Day 1: setup + first menu shown ──────────────────────────────────
 const gate1: Gate = {
