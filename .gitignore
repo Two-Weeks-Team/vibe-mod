@@ -31,3 +31,8 @@ Thumbs.db
 
 # Generated docs
 docs/*.html
+
+# Chrome verify automation (Python venv + Playwright artifacts)
+# These contain Reddit session cookies + page captures with potential PII.
+.venv-chrome-auth/
+playwright/
