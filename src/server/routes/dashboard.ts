@@ -184,8 +184,14 @@ export function registerDashboardRoutes(app: Hono): void {
         form: {
           title: 'vibe-mod Dashboard',
           description: 'Read-only summary. Per-rule activation lives in "vibe-mod: Manage rules".',
+          // The Cancel button on a Devvit form does NOT trigger the submit
+          // handler, so labelling it "Don't show intro again" was actively
+          // misleading — clicking it would never actually persist the
+          // dismiss flag (Gemini #1 PR #49). The dismissOnboarding
+          // boolean toggle above is the real opt-out; submit (Close) sends
+          // the form values through to /internal/form/dashboard-action.
           acceptLabel: 'Close',
-          cancelLabel: firstVisit ? "Don't show intro again" : 'Cancel',
+          cancelLabel: 'Cancel',
           fields,
         },
       },
