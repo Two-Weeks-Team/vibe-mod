@@ -287,6 +287,7 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     allowGuarded: boolean;
     clarificationAnswer?: string | string[];
     clarificationAnswerOther?: string | string[];
+    clarificationTurn?: string | string[];
   }>();
   const rule = raw.rule;
   const allowGuarded = !!raw.allowGuarded;
@@ -297,6 +298,12 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
   const otherAnswer = unwrapFormString(raw.clarificationAnswerOther);
   const selectedAnswer = unwrapFormString(raw.clarificationAnswer);
   const clarificationAnswer = otherAnswer || selectedAnswer;
+
+  // Turn counter (audit finding #5). Round 1 on first compile, increments
+  // each time the LLM asks a follow-up question. Capped at MAX_CLARIFY_TURNS
+  // so an oscillating LLM can't trap the moderator in an infinite modal loop.
+  const turnRaw = unwrapFormString(raw.clarificationTurn);
+  const clarificationTurn = Math.max(1, Math.min(99, Number.parseInt(turnRaw, 10) || 1));
 
   if (!rule?.trim()) {
     return c.json<UiResponse>({ showToast: { text: 'Please type a rule.', appearance: 'neutral' } });
@@ -408,7 +415,22 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
   // the intended option in one click instead of paraphrasing the question.
   // The free-text "other" field is always present as an override / escape
   // hatch — `compose-rule-submit` prefers it when non-empty.
+  //
+  // Turn limit (audit finding #5): if the LLM asks a question on what would
+  // be the (MAX_CLARIFY_TURNS + 1)-th round, refuse with an actionable toast
+  // instead of opening yet another modal — an oscillating model can't trap
+  // the moderator forever.
   if (isClarification(compiled)) {
+    if (clarificationTurn >= MAX_CLARIFY_TURNS) {
+      return c.json<UiResponse>({
+        showToast: {
+          text: `I've asked ${MAX_CLARIFY_TURNS} clarifying questions and still can't compile this rule. Try rephrasing more concretely — e.g. specific numbers like "< 7 days" or "< 50 chars".`,
+          appearance: 'neutral',
+        },
+      });
+    }
+
+    const nextTurn = clarificationTurn + 1;
     const suggested = Array.isArray(compiled.suggestedAnswers)
       ? compiled.suggestedAnswers
           .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
@@ -416,13 +438,17 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
           .slice(0, 8)
       : [];
 
+    // Editable original rule (audit finding #7) — moderator can revise the
+    // English directly inside the clarify modal instead of cancelling out
+    // and starting over. The next compile uses whatever text is in the field
+    // PLUS the clarification answer.
     const fields: FormField[] = [
       {
         name: 'rule',
-        label: 'Original rule (do not edit)',
+        label: 'Original rule (you can edit if you want to revise it)',
         type: 'paragraph',
         defaultValue: rule,
-        disabled: true,
+        helpText: 'Re-compile uses this text plus your answer below.',
       },
     ];
 
@@ -459,12 +485,22 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
       helpText: ALLOW_GUARDED_HELP,
     });
 
+    // Hidden state-carrier — Devvit forms have no `hidden` type, so a disabled
+    // paragraph is the standard pattern for shipping state across rounds.
+    fields.push({
+      name: 'clarificationTurn',
+      label: 'Round (do not edit)',
+      type: 'paragraph',
+      defaultValue: String(nextTurn),
+      disabled: true,
+    });
+
     return c.json<UiResponse>({
       showForm: {
         name: 'ruleComposerForm',
         form: {
           title: 'Clarify the rule',
-          description: compiled.question,
+          description: `(Round ${nextTurn} of ${MAX_CLARIFY_TURNS}) ${compiled.question}`,
           acceptLabel: 'Re-compile',
           fields,
         },
@@ -508,109 +544,214 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     });
   }
 
-  // Append to draft bundle (sub-scoped key). All plugin RPC here is
-  // best-effort — see top of handler for the reddit/devvit#258 rationale.
-  // We've already produced a valid compiled `validated` rule above; even if
-  // persistence fails the user still sees the compile-success toast and the
-  // rule object below.
-  const draftKey = keys.rulesDraft(subredditName);
-  let draftJson: string | undefined;
-  try {
-    draftJson = (await redis.get(draftKey)) ?? undefined;
-  } catch (err) {
-    console.warn('[vibe-mod] submit: redis.get(draft) threw — starting fresh:', describeErr(err));
+  // Audit finding #2 — show a CONFIRMATION form before persisting. The
+  // moderator sees the deterministic compile result rendered as English,
+  // and can either Save (→ /internal/form/compose-confirm-submit, persists +
+  // schedules dry-run) or Edit (→ re-opens compose with the original
+  // sentence pre-filled). State (validated rule, tokens, model) is carried
+  // forward through disabled paragraph fields — Devvit forms have no
+  // hidden-input type, so this is the standard pattern.
+  const llmModel = await readOpenaiModel();
+  const humanized = humanizeRule(validated);
+  const cost = estimateTokenCost(llmModel, tokensIn, tokensOut);
+  const summaryHeader = [
+    `Rule name: ${validated.name}`,
+    `Original sentence: "${validated.sourceNL}"`,
+    ``,
+    humanized,
+    ``,
+    `Compile cost: ${tokensIn} in / ${tokensOut} out tokens (~$${cost.toFixed(5)} on ${llmModel}).`,
+  ].join('\n');
+
+  return c.json<UiResponse>({
+    showForm: {
+      name: 'composeConfirmForm',
+      form: {
+        title: `Confirm: "${validated.name}"`,
+        description:
+          'Review the deterministic compile below. Save to keep this rule as a draft (with a 24h shadow period) and run a dry-run preview against recent posts. Tick "Edit instead" to go back and revise the English.',
+        acceptLabel: 'Save + run dry-run preview',
+        cancelLabel: 'Cancel',
+        fields: [
+          {
+            name: 'compiledSummary',
+            label: 'Compiled rule (read-only)',
+            type: 'paragraph',
+            defaultValue: summaryHeader,
+            disabled: true,
+          },
+          {
+            name: 'editInsteadOfSave',
+            label: 'Edit the original sentence instead of saving',
+            type: 'boolean',
+            defaultValue: false,
+            helpText: 'Tick to re-open the compose form with your original text pre-filled.',
+          },
+          // ── State carriers (disabled paragraphs) ──
+          { name: 'rule', label: '(internal) original NL', type: 'paragraph', defaultValue: rule, disabled: true },
+          {
+            name: 'allowGuarded',
+            label: '(internal) allowGuarded',
+            type: 'boolean',
+            defaultValue: !!allowGuarded,
+            disabled: true,
+          },
+          {
+            name: 'serializedRule',
+            label: '(internal) compiled rule JSON',
+            type: 'paragraph',
+            defaultValue: JSON.stringify(validated),
+            disabled: true,
+          },
+          {
+            name: 'tokensIn',
+            label: '(internal) tokensIn',
+            type: 'paragraph',
+            defaultValue: String(tokensIn),
+            disabled: true,
+          },
+          {
+            name: 'tokensOut',
+            label: '(internal) tokensOut',
+            type: 'paragraph',
+            defaultValue: String(tokensOut),
+            disabled: true,
+          },
+          {
+            name: 'llmModel',
+            label: '(internal) llmModel',
+            type: 'paragraph',
+            defaultValue: llmModel,
+            disabled: true,
+          },
+          {
+            name: 'usingBYOK',
+            label: '(internal) usingBYOK',
+            type: 'boolean',
+            defaultValue: usingBYOK,
+            disabled: true,
+          },
+        ],
+      },
+    },
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Form: Compose confirm submit (audit finding #2 — Save vs Edit branch)
+// ─────────────────────────────────────────────────────────────────────────────
+// Persists the previously-compiled rule into the draft bundle + schedules a
+// dry-run preview. If the moderator ticked "Edit instead", instead re-opens
+// the compose form with their original NL pre-filled so they can revise.
+app.post('/internal/form/compose-confirm-submit', async (c) => {
+  if (!(await isCallerModerator())) {
+    return c.json<UiResponse>({ showToast: { text: 'Only moderators can use this.', appearance: 'neutral' } });
   }
 
-  let llmModel = 'gpt-5.4-mini';
-  try {
-    // Same SELECTION-array unwrap as callOpenAI (PR #39). The submit handler
-    // stores `llmModel` into the draft bundle as metadata; without this
-    // unwrap, the draft.llmModel field would hold `["gpt-5.4-mini"]` instead
-    // of `"gpt-5.4-mini"`, breaking later parses of the bundle.
-    const rawModel = await settings.get('openaiModel');
-    let unwrapped: unknown = rawModel;
-    if (Array.isArray(rawModel) && rawModel.length > 0) unwrapped = rawModel[0];
-    if (typeof unwrapped === 'string' && unwrapped.trim()) llmModel = unwrapped.trim();
-  } catch (err) {
-    console.warn('[vibe-mod] submit: settings.get(openaiModel) threw — using default:', describeErr(err));
-  }
+  const raw = await c.req.json<{
+    compiledSummary?: string | string[];
+    editInsteadOfSave?: boolean;
+    rule?: string | string[];
+    allowGuarded?: boolean;
+    serializedRule?: string | string[];
+    tokensIn?: string | string[];
+    tokensOut?: string | string[];
+    llmModel?: string | string[];
+    usingBYOK?: boolean;
+  }>();
 
-  const draft: RuleBundleType = safeParseBundle(draftJson, 'compose/draft') ?? {
-    schemaVersion: '1.0.0',
-    bundleVersion: 0,
-    compiledAt: Date.now(),
-    llmModel,
-    llmTokensIn: 0,
-    llmTokensOut: 0,
-    rules: [],
-  };
+  const rule = unwrapFormString(raw.rule);
+  const allowGuarded = !!raw.allowGuarded;
+  const serializedRule = unwrapFormString(raw.serializedRule);
+  const tokensIn = Math.max(0, Number.parseInt(unwrapFormString(raw.tokensIn), 10) || 0);
+  const tokensOut = Math.max(0, Number.parseInt(unwrapFormString(raw.tokensOut), 10) || 0);
+  const llmModel = unwrapFormString(raw.llmModel) || 'gpt-5.4-mini';
+  const usingBYOK = !!raw.usingBYOK;
 
-  const existingIdx = draft.rules.findIndex((r) => r.id === validated.id);
-  if (existingIdx >= 0) draft.rules[existingIdx] = validated;
-  else draft.rules.push(validated);
-
-  if (draft.rules.length > 50) {
-    return c.json<UiResponse>({
-      showToast: { text: 'Rule cap reached (50). Delete a rule first.', appearance: 'neutral' },
-    });
-  }
-
-  draft.bundleVersion += 1;
-  draft.compiledAt = Date.now();
-  draft.llmTokensIn += tokensIn;
-  draft.llmTokensOut += tokensOut;
-
-  let persisted = true;
-  try {
-    await redis.set(draftKey, JSON.stringify(draft));
-  } catch (err) {
-    persisted = false;
-    console.warn('[vibe-mod] submit: redis.set(draft) threw — rule NOT persisted:', describeErr(err));
-  }
-
-  // Increment daily compile counter (sub-scoped, BYOK skipped) — best-effort.
-  if (!usingBYOK) {
+  // Edit branch — re-open compose form with the moderator's NL pre-filled
+  // so they can revise without retyping. We deliberately *don't* refund
+  // the compile we just spent (cost is real), but the moderator gets a
+  // second pass for free if their next compile uses cached few-shot.
+  if (raw.editInsteadOfSave) {
+    const subredditName = getCurrentSubredditName();
+    let dailyCountDisplay = '—';
     try {
-      await redis.set(todayCounterKey, String(todayCount + 1));
-      await redis.expire(todayCounterKey, 86_400);
+      dailyCountDisplay = String(Number((await redis.get(keys.compileCount(subredditName, todayKey()))) ?? '0'));
     } catch (err) {
-      console.warn('[vibe-mod] submit: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
+      console.warn('[vibe-mod] confirm: redis.get(dailyCount) threw:', describeErr(err));
     }
-  }
-
-  // Kick off dry-run replay job — best-effort. If scheduler is unreachable
-  // the rule is still compiled; the user just doesn't get the dry-run preview.
-  let dryRunQueued = true;
-  try {
-    await scheduler.runJob({
-      name: 'dry-run-replay',
-      runAt: new Date(),
-      data: { ruleId: validated.id, subredditName },
+    return c.json<UiResponse>({
+      showForm: {
+        name: 'ruleComposerForm',
+        form: {
+          title: `Edit rule for r/${subredditName}`,
+          description: `Compiles used today: ${dailyCountDisplay} / ${LIMITS.COMPILE_RATE_LIMIT_PER_DAY}.\nYour original text is pre-filled — revise and re-compile.`,
+          acceptLabel: 'Compile + Preview',
+          cancelLabel: 'Cancel',
+          fields: [
+            {
+              name: 'rule',
+              label: 'Describe your rule in plain English (max 1000 characters)',
+              type: 'paragraph',
+              defaultValue: rule,
+              helpText: 'Edit the sentence and re-compile.',
+            },
+            {
+              name: 'allowGuarded',
+              label: 'Allow this rule to ban/mute (otherwise removes only)',
+              type: 'boolean',
+              defaultValue: !!allowGuarded,
+              helpText: ALLOW_GUARDED_HELP,
+            },
+          ],
+        },
+      },
     });
-  } catch (err) {
-    dryRunQueued = false;
-    console.warn('[vibe-mod] submit: scheduler.runJob(dry-run) threw — no preview:', describeErr(err));
   }
 
-  // Honest user-facing toast — say what actually happened rather than promising
-  // a dashboard view that won't render if persistence failed. The 1-line
-  // summary (audit finding #6) makes the deterministic JSON contract visible
-  // before the moderator opens the dashboard, and the explicit "open menu →
-  // View rules + log" pointer replaces the previous "check Dashboard" hint
-  // (Devvit toasts have no buttons, so the path has to be in the text).
-  const summary = summarizeRule(validated);
-  const lines = [`Compiled rule "${validated.name}". ${summary}.`];
-  if (persisted && dryRunQueued) {
-    lines.push('Dry-run started — open the subreddit ⋯ menu → "vibe-mod: View rules + log" to see preview.');
-  } else if (persisted) {
-    lines.push('Saved as draft. Open the subreddit ⋯ menu → "vibe-mod: View rules + log".');
-  } else {
-    lines.push('Rule compiled but not persisted — plugin RPC unreachable (reddit/devvit#258).');
+  // Save branch — re-validate the carried JSON (defence in depth: never
+  // trust round-trip state) and run the original persist + dry-run flow.
+  let validated: RuleType;
+  try {
+    validated = Rule.parse(JSON.parse(serializedRule));
+    checkTreeDepth(validated.when as Parameters<typeof checkTreeDepth>[0]);
+    validatePredicateRegexes(validated.when as PredicateTreeShape);
+  } catch (_err) {
+    return c.json<UiResponse>({
+      showToast: {
+        text: 'The compiled rule is no longer valid (please re-compile).',
+        appearance: 'neutral',
+      },
+    });
+  }
+
+  const subredditName = getCurrentSubredditName();
+  const todayCounterKey = keys.compileCount(subredditName, todayKey());
+  let todayCount = 0;
+  try {
+    todayCount = Number((await redis.get(todayCounterKey)) ?? '0');
+  } catch (err) {
+    console.warn('[vibe-mod] confirm: redis.get(todayCount) threw — skipping quota:', describeErr(err));
+  }
+
+  const persistResult = await persistRuleAndStartDryRun({
+    validated,
+    subredditName,
+    tokensIn,
+    tokensOut,
+    llmModel,
+    usingBYOK,
+    todayCount,
+    todayCounterKey,
+  });
+
+  if (persistResult.toast) {
+    return c.json<UiResponse>({ showToast: persistResult.toast });
   }
   return c.json<UiResponse>({
     showToast: {
-      text: lines.join(' '),
-      appearance: persisted ? 'success' : 'neutral',
+      text: persistResult.lines.join(' '),
+      appearance: persistResult.persisted ? 'success' : 'neutral',
     },
   });
 });
@@ -672,6 +813,25 @@ app.post('/internal/menu/dashboard', async (c) => {
     }
   }
 
+  // Token usage snapshot — sum across both bundles. Cost is best-effort
+  // (gpt-5.4-mini pricing assumed for whichever model the bundle records).
+  const totalIn = (active?.llmTokensIn ?? 0) + (draft?.llmTokensIn ?? 0);
+  const totalOut = (active?.llmTokensOut ?? 0) + (draft?.llmTokensOut ?? 0);
+  const llmModel = active?.llmModel ?? draft?.llmModel ?? 'gpt-5.4-mini';
+  const totalCost = estimateTokenCost(llmModel, totalIn, totalOut);
+
+  // Onboarding card (audit Tier-3 #C) — show on first dashboard visit, then
+  // hide once the moderator dismisses it. Best-effort Redis read; if it
+  // fails we fall back to "show" (better than silently hiding the intro).
+  let firstVisit = true;
+  try {
+    firstVisit = !(await redis.get(keys.onboardingDismissed(subredditName)));
+  } catch (err) {
+    console.warn('[vibe-mod] dashboard: redis.get(onboarding) threw:', describeErr(err));
+  }
+  const totalRules = (active?.rules.length ?? 0) + (draft?.rules.length ?? 0);
+  const isEmpty = totalRules === 0 && recent.length === 0;
+
   const summary = [
     ...(rpcOk
       ? []
@@ -680,9 +840,22 @@ app.post('/internal/menu/dashboard', async (c) => {
           'Persistence is offline; this view reflects what redis would return.',
           '',
         ]),
+    ...(firstVisit
+      ? [
+          '👋 Welcome to vibe-mod. 3 quick steps:',
+          '   1. We seeded 5 starter rules — see them below.',
+          '   2. Open ⋯ → "vibe-mod: Manage rules" to activate one (shadow mode for 24h first).',
+          '   3. Open ⋯ → "vibe-mod: Compose rule" to write your own in plain English.',
+          '',
+        ]
+      : []),
+    ...(isEmpty
+      ? ['No rules yet — open the subreddit ⋯ menu → "vibe-mod: Compose rule" to write your first rule.', '']
+      : []),
     `Active rules: ${active?.rules.length ?? 0}`,
     `Draft rules: ${draft?.rules.length ?? 0}`,
     `Recent actions: ${recent.length}`,
+    `Tokens used (lifetime): ${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out (~$${totalCost.toFixed(4)} on ${llmModel}).`,
     ...(dryRunLines.length ? ['', 'Dry-run preview (draft rules):', ...dryRunLines] : []),
     '',
     'Recent actions:',
@@ -695,73 +868,288 @@ app.post('/internal/menu/dashboard', async (c) => {
       form: {
         title: 'vibe-mod Dashboard',
         description: summary,
-        acceptLabel: draft ? `Activate ${draft.rules.length} draft rule(s)` : 'Close',
-        cancelLabel: 'Cancel',
-        fields: [{ name: 'activate', label: 'Promote draft → active', type: 'boolean', defaultValue: false }],
+        acceptLabel: 'Close',
+        cancelLabel: firstVisit ? "Don't show intro again" : 'Cancel',
+        fields: firstVisit
+          ? [
+              {
+                name: 'dismissOnboarding',
+                label: 'Dismiss the welcome intro for this sub',
+                type: 'boolean',
+                defaultValue: false,
+                helpText: 'Tick to hide the 3-step intro on future visits.',
+              },
+            ]
+          : [],
       },
     },
   });
 });
 
+// Dashboard form submit. Now read-only (audit Tier-2 #3 + #10) — per-rule
+// activation moved to the dedicated Manage rules menu. Submit handles only
+// the optional onboarding-dismiss flag.
 app.post('/internal/form/dashboard-action', async (c) => {
   if (!(await isCallerModerator())) {
     return c.json<UiResponse>({ showToast: { text: 'Only moderators can use this.', appearance: 'neutral' } });
   }
 
-  const { activate } = await c.req.json<{ activate: boolean }>();
-  if (!activate) return c.json<UiResponse>({ showToast: 'No action taken.' });
+  const { dismissOnboarding } = await c.req.json<{ dismissOnboarding?: boolean }>();
+  if (dismissOnboarding) {
+    const subredditName = getCurrentSubredditName();
+    try {
+      await redis.set(keys.onboardingDismissed(subredditName), '1');
+    } catch (err) {
+      console.warn('[vibe-mod] dashboard: redis.set(onboarding) threw:', describeErr(err));
+    }
+    return c.json<UiResponse>({ showToast: 'Welcome intro dismissed.' });
+  }
+  return c.json<UiResponse>({ showToast: 'Closed.' });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Menu: Manage rules — per-rule control surface (audit findings #3 + #10)
+// ─────────────────────────────────────────────────────────────────────────────
+// Renders one form-group per rule with a `select` of available actions
+// (Keep / Activate / Promote / Pause / Delete). Submit applies all selected
+// changes in one transaction. Deletes go through a confirm form first so a
+// misclick can't wipe rules silently (audit finding #B).
+app.post('/internal/menu/manage-rules', async (c) => {
+  await c.req.json<MenuItemRequest>();
+  if (!(await isCallerModerator())) {
+    return c.json<UiResponse>({ showToast: { text: 'Only moderators can use this.', appearance: 'neutral' } });
+  }
 
   const subredditName = getCurrentSubredditName();
-  // Best-effort — reddit/devvit#258. Every redis touch wrapped so the user
-  // sees an explanatory toast rather than 500.
+  let active: RuleBundleType | null = null;
   let draft: RuleBundleType | null = null;
   try {
-    draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'activate/draft');
+    active = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'manage/active');
+    draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'manage/draft');
   } catch (err) {
-    console.warn('[vibe-mod] activate: redis.get(draft) threw:', describeErr(err));
+    console.warn('[vibe-mod] manage: redis.get(rules) threw:', describeErr(err));
     return c.json<UiResponse>({
       showToast: {
-        text: 'Plugin RPC unreachable (reddit/devvit#258). Cannot activate rules until the platform is restored.',
+        text: 'Plugin RPC unreachable (reddit/devvit#258). Cannot manage rules until the platform is restored.',
         appearance: 'neutral',
       },
     });
   }
-  if (!draft || draft.rules.length === 0) return c.json<UiResponse>({ showToast: 'No draft to activate.' });
 
-  // Stamp the activation time so the shadow-mode window is measured from when the
-  // rule actually went live, not from when it was compiled (a draft that sits
-  // for >shadowDurationHours would otherwise go live the instant it's activated).
-  // Carry over an existing activatedAt for a rule that's already active under the
-  // same id (re-activating after an edit must not reset its shadow clock).
-  let prevActivatedAt = new Map<string, number>();
-  try {
-    prevActivatedAt = new Map<string, number>(
-      (safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'activate/prev-active')?.rules ?? [])
-        .filter((r): r is RuleType & { activatedAt: number } => typeof r.activatedAt === 'number')
-        .map((r) => [r.id, r.activatedAt]),
-    );
-  } catch (err) {
-    console.warn('[vibe-mod] activate: redis.get(prev-active) threw — treating as none:', describeErr(err));
-  }
-  const now = Date.now();
-  for (const r of draft.rules) r.activatedAt ??= prevActivatedAt.get(r.id) ?? now;
+  const drafts = draft?.rules ?? [];
+  const actives = active?.rules ?? [];
 
-  try {
-    await redis.set(keys.rulesActive(subredditName), JSON.stringify(draft));
-  } catch (err) {
-    console.warn('[vibe-mod] activate: redis.set(active) threw:', describeErr(err));
+  // Empty state (audit finding #A) — guide the moderator to Compose if they
+  // have nothing to manage. Avoids a confusing empty modal on first run.
+  if (drafts.length === 0 && actives.length === 0) {
     return c.json<UiResponse>({
       showToast: {
-        text: 'Activation failed — plugin RPC unreachable (reddit/devvit#258).',
+        text: 'No rules yet. Open the subreddit ⋯ menu → "vibe-mod: Compose rule" to write your first rule.',
         appearance: 'neutral',
       },
     });
   }
+
+  // Pre-fetch dry-run summaries so the per-rule panel can show "would match
+  // X/Y" inline rather than forcing the moderator to bounce to the dashboard.
+  // Parallelized — the previous serial loop multiplied Redis latency by the
+  // draft count (Gemini review #1, PR #44). With up to 50 drafts and ~10ms
+  // per round-trip the difference is ~500ms vs ~10ms wall time.
+  const dryRunByRuleId = new Map<string, string>();
+  const dryRunFetches = await Promise.allSettled(drafts.map((r) => redis.get(keys.dryrun(subredditName, r.id))));
+  for (let i = 0; i < drafts.length; i++) {
+    const r = drafts[i];
+    const settled = dryRunFetches[i];
+    if (settled.status === 'rejected') {
+      console.warn(`[vibe-mod] manage: redis.get(dryrun/${r.id}) threw:`, describeErr(settled.reason));
+      continue;
+    }
+    if (!settled.value) continue;
+    try {
+      const d = JSON.parse(settled.value) as DryRunResult;
+      if (d.status === 'ok') {
+        dryRunByRuleId.set(
+          r.id,
+          `Dry-run: would match ${d.matched.length}/${d.sampledPosts} recent post(s)` +
+            (d.matched.length ? ` → ${[...new Set(d.matched.flatMap((m) => m.would))].join(', ')}` : ''),
+        );
+      } else {
+        dryRunByRuleId.set(r.id, `Dry-run: ${d.note ?? 'unavailable'}`);
+      }
+    } catch (err) {
+      console.warn(`[vibe-mod] manage: parse(dryrun/${r.id}) failed:`, describeErr(err));
+    }
+  }
+
+  const fields: FormField[] = [];
+
+  for (const r of drafts) {
+    const dry = dryRunByRuleId.get(r.id) ?? 'Dry-run: pending — re-open in 30s.';
+    const summary = `${r.sourceNL}\n\n${humanizeRule(r)}\n\n${dry}`;
+    fields.push({
+      type: 'group',
+      label: `📝 Draft: ${r.name}`,
+      fields: [
+        { name: `info_${r.id}`, label: 'Rule', type: 'paragraph', defaultValue: summary, disabled: true },
+        {
+          name: `action_${r.id}`,
+          label: 'Action',
+          type: 'select',
+          options: [
+            { label: 'Keep as draft', value: 'keep' },
+            { label: 'Activate (shadow mode 24h)', value: 'activate-shadow' },
+            { label: 'Activate immediately (skip shadow)', value: 'activate-now' },
+            { label: 'Delete', value: 'delete' },
+          ],
+          defaultValue: ['keep'],
+          multiSelect: false,
+        },
+      ],
+    });
+  }
+
+  for (const r of actives) {
+    const status = r.shadow ? '👻 Shadow' : '✅ Live';
+    const sinceMs = Date.now() - (r.activatedAt ?? r.createdAt);
+    const sinceHours = Math.max(0, Math.round(sinceMs / 3_600_000));
+    const summary = `${r.sourceNL}\n\n${humanizeRule(r)}\n\n${status} for ~${sinceHours}h.`;
+    fields.push({
+      type: 'group',
+      label: `${status}: ${r.name}`,
+      fields: [
+        { name: `info_${r.id}`, label: 'Rule', type: 'paragraph', defaultValue: summary, disabled: true },
+        {
+          name: `action_${r.id}`,
+          label: 'Action',
+          type: 'select',
+          options: [
+            { label: 'Keep', value: 'keep' },
+            ...(r.shadow ? [{ label: 'Promote shadow → live', value: 'promote' }] : []),
+            { label: 'Pause (back to draft)', value: 'pause' },
+            { label: 'Delete', value: 'delete' },
+          ],
+          defaultValue: ['keep'],
+          multiSelect: false,
+        },
+      ],
+    });
+  }
+
   return c.json<UiResponse>({
-    showToast: {
-      text: 'Draft activated. Shadow mode is ON by default — promote per rule in next 24h.',
-      appearance: 'success',
+    showForm: {
+      name: 'manageRulesForm',
+      form: {
+        title: `Manage rules (${drafts.length} draft · ${actives.length} active)`,
+        description:
+          'Pick an action per rule. Deletes will ask for confirmation. Activate moves a draft into the live bundle (with shadow window). Pause moves a live rule back into drafts.',
+        acceptLabel: 'Apply changes',
+        cancelLabel: 'Cancel',
+        fields,
+      },
     },
+  });
+});
+
+// Manage submit — collect every `action_${id}` and apply the diff atomically
+// inside a single redis.set per bundle. Delete actions short-circuit into the
+// confirm form so destructive intent is acknowledged once before the rules
+// disappear (audit finding #B).
+app.post('/internal/form/manage-rules-submit', async (c) => {
+  if (!(await isCallerModerator())) {
+    return c.json<UiResponse>({ showToast: { text: 'Only moderators can use this.', appearance: 'neutral' } });
+  }
+  const raw = (await c.req.json<Record<string, unknown>>()) || {};
+  const actions: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!k.startsWith('action_')) continue;
+    const id = k.slice('action_'.length);
+    const decision = unwrapFormString(v as string | string[]);
+    if (decision && decision !== 'keep') actions[id] = decision;
+  }
+
+  if (Object.keys(actions).length === 0) {
+    return c.json<UiResponse>({ showToast: 'No changes selected.' });
+  }
+
+  // If any deletes → confirm step first.
+  const deleteIds = Object.entries(actions)
+    .filter(([, decision]) => decision === 'delete')
+    .map(([id]) => id);
+
+  if (deleteIds.length > 0) {
+    const subredditName = getCurrentSubredditName();
+    let active: RuleBundleType | null = null;
+    let draft: RuleBundleType | null = null;
+    try {
+      active = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'manage/confirm/active');
+      draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'manage/confirm/draft');
+    } catch (err) {
+      console.warn('[vibe-mod] manage-confirm: redis.get(rules) threw:', describeErr(err));
+    }
+    const findRule = (id: string) => active?.rules.find((x) => x.id === id) ?? draft?.rules.find((x) => x.id === id);
+    const deleteList = deleteIds
+      .map((id) => {
+        const r = findRule(id);
+        return r ? `- ${r.name}  (${id})` : `- ${id}`;
+      })
+      .join('\n');
+
+    return c.json<UiResponse>({
+      showForm: {
+        name: 'manageDeleteConfirmForm',
+        form: {
+          title: `Delete ${deleteIds.length} rule(s)?`,
+          description:
+            `These rules will be removed from both the draft and active bundles. Existing audit-log entries are kept (rollback tokens for any past actions remain valid for 30 days).\n\n` +
+            deleteList,
+          acceptLabel: 'Confirm delete',
+          cancelLabel: 'Cancel',
+          fields: [
+            {
+              name: 'confirmed',
+              label: 'I understand this is permanent',
+              type: 'boolean',
+              defaultValue: false,
+            },
+            {
+              name: 'pendingActions',
+              label: '(internal) pending action map',
+              type: 'paragraph',
+              defaultValue: JSON.stringify(actions),
+              disabled: true,
+            },
+          ],
+        },
+      },
+    });
+  }
+
+  // No deletes → apply non-destructive actions immediately.
+  const result = await applyManageActions(actions);
+  return c.json<UiResponse>({
+    showToast: { text: result.summary, appearance: result.persisted ? 'success' : 'neutral' },
+  });
+});
+
+app.post('/internal/form/manage-delete-confirm', async (c) => {
+  if (!(await isCallerModerator())) {
+    return c.json<UiResponse>({ showToast: { text: 'Only moderators can use this.', appearance: 'neutral' } });
+  }
+  const raw = await c.req.json<{ confirmed?: boolean; pendingActions?: string | string[] }>();
+  if (!raw.confirmed) {
+    return c.json<UiResponse>({ showToast: 'Delete cancelled. No rules were removed.' });
+  }
+  let actions: Record<string, string> = {};
+  try {
+    actions = JSON.parse(unwrapFormString(raw.pendingActions)) as Record<string, string>;
+  } catch (_err) {
+    return c.json<UiResponse>({
+      showToast: { text: 'Could not parse the pending action set. Re-open Manage rules.', appearance: 'neutral' },
+    });
+  }
+  const result = await applyManageActions(actions);
+  return c.json<UiResponse>({
+    showToast: { text: result.summary, appearance: result.persisted ? 'success' : 'neutral' },
   });
 });
 
@@ -1505,6 +1893,352 @@ function summarizeRule(r: RuleType): string {
 // explain the ban/mute toggle the same way (audit finding #4).
 const ALLOW_GUARDED_HELP =
   "vibe-mod only emits ban/mute when your rule explicitly says 'ban' or 'mute'. This checkbox lets the compile succeed when it does — leave it off for a removes-only rule.";
+
+// Max number of clarification rounds before the server bails with an
+// actionable toast (audit finding #5). Round 1 = initial compile. Rounds
+// 2-3 = LLM follow-up questions. After round 3, no more modal — the
+// moderator gets advice to rephrase concretely.
+const MAX_CLARIFY_TURNS = 3;
+
+// Pricing snapshot for token-cost display (audit finding D). gpt-5.4-mini
+// is the default; prices move occasionally so this is best-effort and the
+// dashboard shows it as "~$X" rather than a precise figure. Source:
+// platform.openai.com/docs/pricing as of 2026-05-14.
+const OPENAI_PRICING_USD_PER_TOKEN: Record<string, { in: number; out: number }> = {
+  'gpt-5.4-mini': { in: 0.00000015, out: 0.0000006 },
+  'gpt-5.4-nano': { in: 0.0000001, out: 0.0000004 },
+  'gpt-5.4': { in: 0.0000025, out: 0.00001 },
+};
+
+// Estimate token cost for a (model, in, out) triple. Returns 0 if model
+// unknown so we never crash on a future model name.
+function estimateTokenCost(model: string, tokensIn: number, tokensOut: number): number {
+  const p = OPENAI_PRICING_USD_PER_TOKEN[model];
+  if (!p) return 0;
+  return tokensIn * p.in + tokensOut * p.out;
+}
+
+// Read the openaiModel SELECTION setting, defensively unwrapping the array
+// that Devvit returns even for single-select (PR #39 SELECTION-array root
+// cause). Returns the default model name if the setting is missing or the
+// plugin RPC is unreachable.
+async function readOpenaiModel(): Promise<string> {
+  const DEFAULT = 'gpt-5.4-mini';
+  try {
+    const raw = await settings.get('openaiModel');
+    let unwrapped: unknown = raw;
+    if (Array.isArray(raw) && raw.length > 0) unwrapped = raw[0];
+    if (typeof unwrapped === 'string' && unwrapped.trim()) return unwrapped.trim();
+  } catch (err) {
+    console.warn('[vibe-mod] readOpenaiModel: settings.get threw — using default:', describeErr(err));
+  }
+  return DEFAULT;
+}
+
+// Apply a manage-rules action map atomically. Each id maps to one of:
+//   keep | activate-shadow | activate-now | promote | pause | delete
+// Plain reads + 1 write per bundle. All plugin RPC wrapped because
+// reddit/devvit#258 still rears its head occasionally.
+async function applyManageActions(actions: Record<string, string>): Promise<{ persisted: boolean; summary: string }> {
+  const subredditName = getCurrentSubredditName();
+  let active: RuleBundleType | null = null;
+  let draft: RuleBundleType | null = null;
+  try {
+    active = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'manage/apply/active');
+    draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'manage/apply/draft');
+  } catch (err) {
+    console.warn('[vibe-mod] manage/apply: redis.get(rules) threw:', describeErr(err));
+    return {
+      persisted: false,
+      summary: 'Plugin RPC unreachable (reddit/devvit#258). No changes applied.',
+    };
+  }
+
+  // Empty bundles default — treat as no rules; deletes / promotes against
+  // missing rules silently no-op (the result summary tells the user).
+  const draftRules: RuleType[] = (draft?.rules ?? []).slice();
+  const activeRules: RuleType[] = (active?.rules ?? []).slice();
+  const now = Date.now();
+
+  let activated = 0;
+  let promoted = 0;
+  let paused = 0;
+  let deleted = 0;
+  let kept = 0;
+
+  for (const [id, decision] of Object.entries(actions)) {
+    if (decision === 'keep') {
+      kept++;
+      continue;
+    }
+    const inDraftIdx = draftRules.findIndex((r) => r.id === id);
+    const inActiveIdx = activeRules.findIndex((r) => r.id === id);
+
+    if (decision === 'activate-shadow' || decision === 'activate-now') {
+      if (inDraftIdx < 0) continue; // not a draft → no-op
+      const r = draftRules[inDraftIdx];
+      r.shadow = decision === 'activate-shadow';
+      r.activatedAt = now;
+      // Move from draft to active (or upsert into active by id).
+      const existing = activeRules.findIndex((x) => x.id === id);
+      if (existing >= 0) activeRules[existing] = r;
+      else activeRules.push(r);
+      draftRules.splice(inDraftIdx, 1);
+      activated++;
+    } else if (decision === 'promote') {
+      if (inActiveIdx < 0) continue;
+      const r = activeRules[inActiveIdx];
+      if (r.shadow) {
+        r.shadow = false;
+        promoted++;
+      }
+    } else if (decision === 'pause') {
+      if (inActiveIdx < 0) continue;
+      const r = activeRules[inActiveIdx];
+      r.shadow = true;
+      // Move from active to draft. ID stable.
+      const existing = draftRules.findIndex((x) => x.id === id);
+      if (existing >= 0) draftRules[existing] = r;
+      else draftRules.push(r);
+      activeRules.splice(inActiveIdx, 1);
+      paused++;
+    } else if (decision === 'delete') {
+      if (inDraftIdx >= 0) draftRules.splice(inDraftIdx, 1);
+      if (inActiveIdx >= 0) activeRules.splice(inActiveIdx, 1);
+      if (inDraftIdx >= 0 || inActiveIdx >= 0) deleted++;
+    }
+  }
+
+  // Enforce the 50-rule cap on BOTH bundles before persistence (Gemini
+  // review #2, PR #44). pause / activate / unpause moves can push a
+  // bundle over the limit. Reject up front rather than persist a bundle
+  // that subsequent compose-rule-submit calls will refuse to extend.
+  if (activeRules.length > 50 || draftRules.length > 50) {
+    return {
+      persisted: false,
+      summary: `Rule cap exceeded after this change (active=${activeRules.length}, draft=${draftRules.length}, max=50). Delete a rule first, then retry.`,
+    };
+  }
+
+  // Use the currently configured model as the fallback (Gemini review #3,
+  // PR #44). The previous 'manage' literal broke estimateTokenCost() because
+  // it isn't a key in OPENAI_PRICING_USD_PER_TOKEN. We never *consume* this
+  // field for compile cost (manage doesn't call OpenAI), but the dashboard
+  // still shows "(~$X on <model>)" using whatever the last bundle wrote.
+  const fallbackModel = await readOpenaiModel();
+  const draftBundle: RuleBundleType = {
+    schemaVersion: '1.0.0',
+    bundleVersion: (draft?.bundleVersion ?? 0) + 1,
+    compiledAt: now,
+    llmModel: draft?.llmModel ?? fallbackModel,
+    llmTokensIn: draft?.llmTokensIn ?? 0,
+    llmTokensOut: draft?.llmTokensOut ?? 0,
+    rules: draftRules,
+  };
+  const activeBundle: RuleBundleType = {
+    schemaVersion: '1.0.0',
+    bundleVersion: (active?.bundleVersion ?? 0) + 1,
+    compiledAt: now,
+    llmModel: active?.llmModel ?? fallbackModel,
+    llmTokensIn: active?.llmTokensIn ?? 0,
+    llmTokensOut: active?.llmTokensOut ?? 0,
+    rules: activeRules,
+  };
+
+  // Atomic dual-write via Devvit's MULTI/EXEC (Gemini review #4, PR #44).
+  // The previous Promise.all of two independent set()s could leave the two
+  // bundles out of sync if the second write failed (e.g. a paused rule
+  // disappears from active without showing up in draft). watch() also
+  // detects concurrent modifications by another moderator's manage submit
+  // and aborts — the toast tells the user to retry.
+  let persisted = true;
+  let aborted = false;
+  try {
+    const txn = await redis.watch(keys.rulesActive(subredditName), keys.rulesDraft(subredditName));
+    await txn.multi();
+    await txn.set(keys.rulesActive(subredditName), JSON.stringify(activeBundle));
+    await txn.set(keys.rulesDraft(subredditName), JSON.stringify(draftBundle));
+    const result = await txn.exec();
+    // exec() returns null when the WATCH detected a concurrent change.
+    if (result == null) aborted = true;
+  } catch (err) {
+    persisted = false;
+    console.warn('[vibe-mod] manage/apply: txn.exec threw:', describeErr(err));
+  }
+  if (aborted) {
+    persisted = false;
+  }
+
+  const parts: string[] = [];
+  if (activated) parts.push(`activated ${activated}`);
+  if (promoted) parts.push(`promoted ${promoted}`);
+  if (paused) parts.push(`paused ${paused}`);
+  if (deleted) parts.push(`deleted ${deleted}`);
+  if (parts.length === 0 && kept > 0) parts.push(`kept ${kept} (no other action)`);
+  if (parts.length === 0) parts.push('no matching rules to change');
+  const summary = persisted
+    ? `Applied: ${parts.join(', ')}.`
+    : aborted
+      ? `Another moderator changed the rules at the same time — your changes were not applied. Re-open Manage rules and try again. (Intended: ${parts.join(', ')}.)`
+      : `Could not persist (plugin RPC unreachable). Intended: ${parts.join(', ')}.`;
+  return { persisted, summary };
+}
+
+// Persist a validated rule into the draft bundle and schedule a dry-run.
+// Extracted from compose-rule-submit so the new compose-confirm-submit
+// (audit finding #2) can re-use the exact same persistence flow without
+// duplicating the best-effort plugin-RPC error handling. Returns the toast
+// payload the caller should send back to the moderator.
+async function persistRuleAndStartDryRun(opts: {
+  validated: RuleType;
+  subredditName: string;
+  tokensIn: number;
+  tokensOut: number;
+  llmModel: string;
+  usingBYOK: boolean;
+  todayCount: number;
+  todayCounterKey: string;
+}): Promise<{
+  persisted: boolean;
+  dryRunQueued: boolean;
+  lines: string[];
+  toast?: { text: string; appearance: 'neutral' | 'success' };
+}> {
+  const { validated, subredditName, tokensIn, tokensOut, llmModel, usingBYOK, todayCount, todayCounterKey } = opts;
+
+  const draftKey = keys.rulesDraft(subredditName);
+  let draftJson: string | undefined;
+  try {
+    draftJson = (await redis.get(draftKey)) ?? undefined;
+  } catch (err) {
+    console.warn('[vibe-mod] persist: redis.get(draft) threw — starting fresh:', describeErr(err));
+  }
+
+  const draft: RuleBundleType = safeParseBundle(draftJson, 'compose/draft') ?? {
+    schemaVersion: '1.0.0',
+    bundleVersion: 0,
+    compiledAt: Date.now(),
+    llmModel,
+    llmTokensIn: 0,
+    llmTokensOut: 0,
+    rules: [],
+  };
+
+  const existingIdx = draft.rules.findIndex((r) => r.id === validated.id);
+  if (existingIdx >= 0) draft.rules[existingIdx] = validated;
+  else draft.rules.push(validated);
+
+  if (draft.rules.length > 50) {
+    return {
+      persisted: false,
+      dryRunQueued: false,
+      lines: [],
+      toast: { text: 'Rule cap reached (50). Delete a rule first.', appearance: 'neutral' },
+    };
+  }
+
+  draft.bundleVersion += 1;
+  draft.compiledAt = Date.now();
+  draft.llmTokensIn += tokensIn;
+  draft.llmTokensOut += tokensOut;
+
+  let persisted = true;
+  try {
+    await redis.set(draftKey, JSON.stringify(draft));
+  } catch (err) {
+    persisted = false;
+    console.warn('[vibe-mod] persist: redis.set(draft) threw — rule NOT persisted:', describeErr(err));
+  }
+
+  if (!usingBYOK) {
+    try {
+      await redis.set(todayCounterKey, String(todayCount + 1));
+      await redis.expire(todayCounterKey, 86_400);
+    } catch (err) {
+      console.warn('[vibe-mod] persist: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
+    }
+  }
+
+  let dryRunQueued = true;
+  try {
+    await scheduler.runJob({
+      name: 'dry-run-replay',
+      runAt: new Date(),
+      data: { ruleId: validated.id, subredditName },
+    });
+  } catch (err) {
+    dryRunQueued = false;
+    console.warn('[vibe-mod] persist: scheduler.runJob(dry-run) threw — no preview:', describeErr(err));
+  }
+
+  const summary = summarizeRule(validated);
+  const lines = [`Compiled rule "${validated.name}". ${summary}.`];
+  if (persisted && dryRunQueued) {
+    lines.push('Dry-run started — open the subreddit ⋯ menu → "vibe-mod: View rules + log" to see preview.');
+  } else if (persisted) {
+    lines.push('Saved as draft. Open the subreddit ⋯ menu → "vibe-mod: View rules + log".');
+  } else {
+    lines.push('Rule compiled but not persisted — plugin RPC unreachable (reddit/devvit#258).');
+  }
+
+  return { persisted, dryRunQueued, lines };
+}
+
+// Convert a compiled Rule into a human-readable English description for the
+// compose-confirm form (audit finding #2). Renders trigger names, the
+// PredicateTree as bulleted boolean logic, and the action list. Pure
+// function — same input always renders the same output, matching the
+// "deterministic" promise in README §0.
+function humanizeRule(r: RuleType): string {
+  const triggerLabel = (t: string): string =>
+    t === 'onPostSubmit'
+      ? 'a new post is submitted'
+      : t === 'onCommentSubmit'
+        ? 'a new comment is submitted'
+        : t === 'onPostReport'
+          ? 'a post is reported'
+          : t === 'onCommentReport'
+            ? 'a comment is reported'
+            : t;
+  const predicateLabel = (tree: unknown, indent = '  '): string => {
+    if (!tree || typeof tree !== 'object') return `${indent}(empty)`;
+    const t = tree as PredicateTreeShape & { value?: unknown };
+    if (Array.isArray(t.all)) {
+      const inner = t.all.map((c) => predicateLabel(c, indent + '  ')).join('\n');
+      return `${indent}ALL of:\n${inner}`;
+    }
+    if (Array.isArray(t.any)) {
+      const inner = t.any.map((c) => predicateLabel(c, indent + '  ')).join('\n');
+      return `${indent}ANY of:\n${inner}`;
+    }
+    if (t.not) return `${indent}NOT ${predicateLabel(t.not, '').trim()}`;
+    // Truncate long array / object values so the confirm form's
+    // compiledSummary doesn't bloat to thousands of characters when a
+    // rule uses `op: in` against a long allowlist (CodeRabbit review,
+    // PR #44).
+    const valueStr = JSON.stringify(t.value);
+    const display = valueStr.length > 100 ? valueStr.slice(0, 97) + '...' : valueStr;
+    return `${indent}${t.fact} ${t.op} ${display}`;
+  };
+  const actionLabel = (a: { action: string; params?: Record<string, unknown> }): string => {
+    const p = a.params ?? {};
+    if (a.action === 'modqueue') return `send to mod queue (note: "${p.note ?? ''}")`;
+    if (a.action === 'remove') return `remove (spam: ${p.spam ? 'yes' : 'no'})`;
+    if (a.action === 'flair') return `set flair to "${p.flairText ?? ''}"`;
+    if (a.action === 'lock') return `lock the thread`;
+    if (a.action === 'report') return `report (reason: "${p.reason ?? ''}")`;
+    if (a.action === 'ban')
+      return `BAN user${p.duration ? ` for ${p.duration}d` : ' permanently'} (reason: "${p.reason ?? ''}")`;
+    if (a.action === 'mute') return `MUTE user for ${p.duration ?? '?'}h`;
+    if (a.action === 'permaban') return `PERMABAN user (reason: "${p.reason ?? ''}")`;
+    return a.action;
+  };
+  const triggers = r.on.map(triggerLabel).join(' OR ');
+  const conditions = predicateLabel(r.when as PredicateTreeShape);
+  const actions = r.then.map((a) => '  - ' + actionLabel(a)).join('\n');
+  const rateLimit = r.rateLimit?.perAuthor ? `\nRate limit: ${r.rateLimit.perAuthor} per author.` : '';
+  return [`When ${triggers}, IF:`, conditions, `THEN:`, actions, rateLimit].filter(Boolean).join('\n');
+}
 
 export default app;
 
