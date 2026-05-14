@@ -42,6 +42,38 @@ const VALID_COMPILED = {
   then: [{ action: 'modqueue', params: { note: 'low-karma' } }],
 };
 
+/**
+ * Helper for the new 2-step compose flow (Phase 1.7b, audit finding #2):
+ *   compose-rule-submit  → returns showForm composeConfirmForm with state
+ *   compose-confirm-submit → reads that state, persists draft + dry-run
+ *
+ * Tests that previously asserted "1 call → showToast success" must now do
+ * both steps. This helper does the round-trip and returns the final body.
+ */
+async function compileAndConfirm(
+  rule: string,
+  allowGuarded: boolean,
+  extraSubmitPayload: Record<string, unknown> = {},
+): Promise<{ confirmFormBody: any; saveBody: any }> {
+  const composeRes = await call('/internal/form/compose-rule-submit', {
+    rule,
+    allowGuarded,
+    ...extraSubmitPayload,
+  });
+  const confirmFormBody = await composeRes.json();
+  // If we got a clarification or a toast (error), there's nothing to confirm.
+  if (!confirmFormBody.showForm || confirmFormBody.showForm.name !== 'composeConfirmForm') {
+    return { confirmFormBody, saveBody: null };
+  }
+  // Replay the form's current values back as the confirm submission.
+  const fields = confirmFormBody.showForm.form.fields as Array<{ name: string; defaultValue: unknown }>;
+  const payload: Record<string, unknown> = {};
+  for (const f of fields) payload[f.name] = f.defaultValue;
+  payload.editInsteadOfSave = false;
+  const saveRes = await call('/internal/form/compose-confirm-submit', payload);
+  return { confirmFormBody, saveBody: await saveRes.json() };
+}
+
 beforeEach(() => {
   // default: caller is NOT a mod; tests opt in via asMod()
   fakeReddit.getCurrentUser.mockResolvedValue({ id: 't2_caller', username: 'caller' });
@@ -110,10 +142,8 @@ describe('POST /internal/form/compose-rule-submit', () => {
     );
     fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
 
-    const body = await (
-      await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false })
-    ).json();
-    expect(body.showToast.appearance).toBe('success');
+    const { saveBody } = await compileAndConfirm(VALID_COMPILED.sourceNL, false);
+    expect(saveBody.showToast.appearance).toBe('success');
     // BYOK → counter not incremented
     expect(await fakeRedis.get(`testsub:compile:count:${today}`)).toBe('50');
   });
@@ -146,9 +176,14 @@ describe('POST /internal/form/compose-rule-submit', () => {
     ).json();
     expect(body.showForm.name).toBe('ruleComposerForm');
     expect(body.showForm.form.title).toBe('Clarify the rule');
-    expect(body.showForm.form.description).toBe('What counts as low karma?');
+    // Phase 1.7b (audit finding #5): clarify form description gets a
+    // (Round X of N) prefix so the moderator sees how many tries remain.
+    expect(body.showForm.form.description).toMatch(/Round 2 of 3/);
+    expect(body.showForm.form.description).toContain('What counts as low karma?');
     const fieldNames = body.showForm.form.fields.map((f: { name: string }) => f.name);
     expect(fieldNames).toContain('clarificationAnswer');
+    // The hidden state-carrier `clarificationTurn` is now part of the form.
+    expect(fieldNames).toContain('clarificationTurn');
   });
 
   // ── Phase 1.6 (audit finding #1): suggestedAnswers → select field ──
@@ -254,40 +289,147 @@ describe('POST /internal/form/compose-rule-submit', () => {
     expect(guarded?.helpText).toMatch(/explicitly says/);
   });
 
+  // ── Phase 1.7b (audit finding #2): compose-confirm-submit Edit branch ──
+  it('compose-confirm-submit "Edit instead" re-opens the compose form with the original NL pre-filled', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
+    fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
+
+    // Get to the confirm form first.
+    const composeRes = await call('/internal/form/compose-rule-submit', {
+      rule: VALID_COMPILED.sourceNL,
+      allowGuarded: false,
+    });
+    const confirmForm = await composeRes.json();
+    const fields = confirmForm.showForm.form.fields as Array<{ name: string; defaultValue: unknown }>;
+    const payload: Record<string, unknown> = {};
+    for (const f of fields) payload[f.name] = f.defaultValue;
+    payload.editInsteadOfSave = true; // ← user ticks Edit
+
+    const editRes = await call('/internal/form/compose-confirm-submit', payload);
+    const editBody = await editRes.json();
+    expect(editBody.showForm.name).toBe('ruleComposerForm');
+    expect(editBody.showForm.form.title).toMatch(/Edit rule/);
+    const ruleField = editBody.showForm.form.fields.find((f: { name: string }) => f.name === 'rule');
+    expect(ruleField.defaultValue).toBe(VALID_COMPILED.sourceNL);
+    // Nothing was persisted on the Edit branch.
+    expect(await fakeRedis.get('testsub:rules:draft')).toBeUndefined();
+  });
+
+  // ── Phase 1.7b (audit finding #5): clarification turn limit ──
+  it('refuses a 4th-round clarification with an actionable toast (turn limit = 3)', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
+    // LLM keeps asking for clarification.
+    fakeFetch.mockResolvedValue(
+      openaiResponse({
+        needsClarification: true,
+        question: 'Please clarify further',
+        suggestedAnswers: ['option a', 'option b'],
+      }),
+    );
+    // Simulate the 3rd-round form submission (clarificationTurn=3 from previous round).
+    const body = await (
+      await call('/internal/form/compose-rule-submit', {
+        rule: 'something vague',
+        allowGuarded: false,
+        clarificationTurn: '3',
+      })
+    ).json();
+    expect(body.showToast).toBeDefined();
+    expect(body.showToast.text).toMatch(/3 clarifying questions/);
+    expect(body.showToast.text).toMatch(/rephrasing more concretely/);
+    // No new form opened.
+    expect(body.showForm).toBeUndefined();
+  });
+
+  it('clarify form bumps the turn counter on each round', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
+    fakeFetch.mockResolvedValue(openaiResponse({ needsClarification: true, question: 'Q?', suggestedAnswers: ['a'] }));
+    // Round 1 (no clarificationTurn → server treats as 1).
+    const r1 = await (
+      await call('/internal/form/compose-rule-submit', { rule: 'vague rule', allowGuarded: false })
+    ).json();
+    const turn1 = (r1.showForm.form.fields as Array<{ name: string; defaultValue: unknown }>).find(
+      (f) => f.name === 'clarificationTurn',
+    )!.defaultValue;
+    expect(turn1).toBe('2'); // next round
+    expect(r1.showForm.form.description).toMatch(/Round 2 of 3/);
+
+    // Round 2 (echo turn=2 back).
+    const r2 = await (
+      await call('/internal/form/compose-rule-submit', {
+        rule: 'vague rule',
+        allowGuarded: false,
+        clarificationTurn: '2',
+      })
+    ).json();
+    const turn2 = (r2.showForm.form.fields as Array<{ name: string; defaultValue: unknown }>).find(
+      (f) => f.name === 'clarificationTurn',
+    )!.defaultValue;
+    expect(turn2).toBe('3');
+    expect(r2.showForm.form.description).toMatch(/Round 3 of 3/);
+  });
+
+  // ── Phase 1.7b (audit finding #7): editable original rule in clarify modal ──
+  it('clarify form leaves the Original rule field enabled (audit finding #7)', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
+    fakeFetch.mockResolvedValue(openaiResponse({ needsClarification: true, question: 'Q?', suggestedAnswers: ['a'] }));
+    const body = await (
+      await call('/internal/form/compose-rule-submit', { rule: 'edit me', allowGuarded: false })
+    ).json();
+    const ruleField = (body.showForm.form.fields as Array<{ name: string; disabled?: boolean }>).find(
+      (f) => f.name === 'rule',
+    )!;
+    expect(ruleField.disabled).toBeFalsy();
+  });
+
   // ── Phase 1.6 (audit finding #6): success toast carries rule summary + menu hint ──
+  // After Phase 1.7b, the toast comes from /compose-confirm-submit (not the
+  // compose-rule-submit handler), but the wording lives in
+  // persistRuleAndStartDryRun() so the assertions still apply to the saved toast.
   it('success toast includes a 1-line rule summary and the View-rules menu hint', async () => {
     asMod();
     fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
     fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
-    const body = await (
-      await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false })
-    ).json();
-    expect(body.showToast.appearance).toBe('success');
-    // 1-line summary like "→ post: modqueue"
-    expect(body.showToast.text).toMatch(/→\s*post[\w+]*:\s*modqueue/);
-    // Explicit menu pointer (Devvit toasts have no buttons → text path required)
-    expect(body.showToast.text).toContain('vibe-mod: View rules + log');
+    const { saveBody } = await compileAndConfirm(VALID_COMPILED.sourceNL, false);
+    expect(saveBody.showToast.appearance).toBe('success');
+    expect(saveBody.showToast.text).toMatch(/→\s*post[\w+]*:\s*modqueue/);
+    expect(saveBody.showToast.text).toContain('vibe-mod: View rules + log');
   });
 
-  it('compiles a valid rule → stores a draft, bumps the counter, schedules the dry-run', async () => {
+  it('compiles a valid rule → shows confirm form → on Save: stores draft, bumps counter, schedules dry-run', async () => {
     asMod();
     fakeSettings.get.mockImplementation(async (k: string) =>
       k === 'openaiApiKey' ? 'sk-dev' : k === 'openaiModel' ? 'gpt-5.4-nano' : undefined,
     );
     fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
 
-    const res = await call('/internal/form/compose-rule-submit', {
-      rule: VALID_COMPILED.sourceNL,
-      allowGuarded: false,
-    });
-    const body = await res.json();
-    expect(body.showToast.appearance).toBe('success');
-    expect(body.showToast.text).toContain('Flag low-karma posts');
+    const { confirmFormBody, saveBody } = await compileAndConfirm(VALID_COMPILED.sourceNL, false);
+    // Phase 1.7b (audit finding #2): compile-rule-submit returns a confirm form,
+    // not a success toast. Persistence happens on /compose-confirm-submit.
+    expect(confirmFormBody.showForm.name).toBe('composeConfirmForm');
+    expect(confirmFormBody.showForm.form.title).toContain('Flag low-karma posts');
+    // The form embeds the compiled rule + token counts as state carriers.
+    const fieldsByName = Object.fromEntries(
+      (confirmFormBody.showForm.form.fields as Array<{ name: string; defaultValue: unknown }>).map((f) => [
+        f.name,
+        f.defaultValue,
+      ]),
+    );
+    expect(fieldsByName.serializedRule).toContain('r_low_karma_flag');
+    expect(fieldsByName.llmModel).toBe('gpt-5.4-nano');
+
+    // After Save: draft persisted, counter bumped, dry-run scheduled.
+    expect(saveBody.showToast.appearance).toBe('success');
+    expect(saveBody.showToast.text).toContain('Flag low-karma posts');
 
     const draft = JSON.parse((await fakeRedis.get('testsub:rules:draft'))!);
     expect(draft.rules).toHaveLength(1);
     expect(draft.rules[0].id).toBe('r_low_karma_flag');
-    expect(draft.rules[0].shadow).toBe(true); // always seeded in shadow
+    expect(draft.rules[0].shadow).toBe(true);
     expect(draft.rules[0].createdBy).toBe('t2_caller');
     expect(draft.bundleVersion).toBe(1);
 
@@ -306,9 +448,9 @@ describe('POST /internal/form/compose-rule-submit', () => {
     asMod();
     fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
     fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
-    await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false });
+    await compileAndConfirm(VALID_COMPILED.sourceNL, false);
     fakeFetch.mockResolvedValue(openaiResponse({ ...VALID_COMPILED, name: 'Flag low-karma posts (v2)' }));
-    await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false });
+    await compileAndConfirm(VALID_COMPILED.sourceNL, false);
 
     const draft = JSON.parse((await fakeRedis.get('testsub:rules:draft'))!);
     expect(draft.rules).toHaveLength(1);
@@ -326,17 +468,20 @@ describe('POST /internal/form/compose-rule-submit', () => {
     };
     fakeFetch.mockResolvedValue(openaiResponse(banRule));
 
-    const blocked = await (
-      await call('/internal/form/compose-rule-submit', { rule: 'ban repeat spammers', allowGuarded: false })
-    ).json();
+    // First attempt — ban without "Allow ban/mute" → blocked at compose-rule-submit
+    // (toast, no confirm form). Use the raw call() so we can assert the toast.
+    const blockedRes = await call('/internal/form/compose-rule-submit', {
+      rule: 'ban repeat spammers',
+      allowGuarded: false,
+    });
+    const blocked = await blockedRes.json();
     expect(blocked.showToast.text).toMatch(/ban\/mute/i);
     expect(await fakeRedis.get('testsub:rules:draft')).toBeUndefined();
 
+    // Second attempt — with allowGuarded: true → goes through confirm + save.
     fakeFetch.mockResolvedValue(openaiResponse(banRule));
-    const allowed = await (
-      await call('/internal/form/compose-rule-submit', { rule: 'ban repeat spammers', allowGuarded: true })
-    ).json();
-    expect(allowed.showToast.appearance).toBe('success');
+    const { saveBody } = await compileAndConfirm('ban repeat spammers', true);
+    expect(saveBody.showToast.appearance).toBe('success');
     const draft = JSON.parse((await fakeRedis.get('testsub:rules:draft'))!);
     expect(draft.rules[0].then[0].action).toBe('ban');
   });
@@ -385,10 +530,8 @@ describe('POST /internal/form/compose-rule-submit', () => {
     });
     fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
 
-    const body = await (
-      await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false })
-    ).json();
-    expect(body.showToast.appearance).toBe('success');
+    const { saveBody } = await compileAndConfirm(VALID_COMPILED.sourceNL, false);
+    expect(saveBody.showToast.appearance).toBe('success');
     // confirm we DID call OpenAI (BYOK throw didn't fatal the flow)
     expect(fakeFetch).toHaveBeenCalled();
   });
@@ -443,21 +586,15 @@ describe('POST /internal/form/compose-rule-submit', () => {
 
   it('returns a deterministic fake compiled rule when VIBE_MOD_AI_PROVIDER=mock (local-only)', async () => {
     asMod();
-    // Mock provider bypasses settings AND fetch entirely.
-    fakeSettings.get.mockImplementation(async () => {
-      throw new Error('should not be called');
-    });
+    // Mock provider bypasses settings AND fetch entirely (for the compile call).
+    // The confirm flow still reads openaiModel for the cost display, so allow that.
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiModel' ? 'gpt-5.4-mini' : undefined));
     const prev = process.env.VIBE_MOD_AI_PROVIDER;
     process.env.VIBE_MOD_AI_PROVIDER = 'mock';
     try {
-      const body = await (
-        await call('/internal/form/compose-rule-submit', {
-          rule: 'flag brand-new accounts within 72h',
-          allowGuarded: false,
-        })
-      ).json();
-      expect(body.showToast.appearance).toBe('success');
-      expect(body.showToast.text).toMatch(/Mock compiled rule/);
+      const { saveBody } = await compileAndConfirm('flag brand-new accounts within 72h', false);
+      expect(saveBody.showToast.appearance).toBe('success');
+      expect(saveBody.showToast.text).toMatch(/Mock compiled rule/);
       expect(fakeFetch).not.toHaveBeenCalled();
     } finally {
       if (prev === undefined) delete process.env.VIBE_MOD_AI_PROVIDER;

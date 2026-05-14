@@ -1,7 +1,10 @@
 // src/server/routes-dashboard.test.ts
-// Functional call-tests for the Dashboard feature: the menu that renders the
-// rules + recent-actions summary, and the form action that promotes a draft
-// bundle to active.
+// Functional call-tests for the Dashboard feature.
+//
+// Phase 1.7b (audit Tier-2 #3 + #10): Dashboard is now read-only — per-rule
+// activation moved to the dedicated "Manage rules" menu (see
+// routes-manage.test.ts). The Dashboard form's submit only handles the
+// optional onboarding-dismiss flag (Tier-3 #C).
 
 import { describe, it, expect } from 'vitest';
 import app from './index';
@@ -45,13 +48,22 @@ describe('POST /internal/menu/dashboard', () => {
     expect(body.showForm.form.acceptLabel).toBe('Close');
   });
 
-  it('summarises active + draft counts and recent actions, with an Activate label when a draft exists', async () => {
+  it('summarises active + draft counts, recent actions, and lifetime token cost (Tier-2 #D)', async () => {
     asMod();
     await fakeRedis.set(
       'testsub:rules:active',
-      JSON.stringify({ ...seedStarterRules(1), rules: seedStarterRules(1).rules.slice(0, 2) }),
+      JSON.stringify({
+        ...seedStarterRules(1),
+        rules: seedStarterRules(1).rules.slice(0, 2),
+        llmTokensIn: 1000,
+        llmTokensOut: 200,
+        llmModel: 'gpt-5.4-mini',
+      }),
     );
-    await fakeRedis.set('testsub:rules:draft', JSON.stringify(seedStarterRules(2)));
+    await fakeRedis.set(
+      'testsub:rules:draft',
+      JSON.stringify({ ...seedStarterRules(2), llmTokensIn: 500, llmTokensOut: 100 }),
+    );
     await seedAudit(
       'a_1',
       { action: 'modqueue', outcome: 'applied', ruleSourceNL: 'flag low karma posts', thingId: 't3_x' },
@@ -71,7 +83,9 @@ describe('POST /internal/menu/dashboard', () => {
     expect(body.showForm.form.description).toContain('Recent actions: 2');
     expect(body.showForm.form.description).toContain('modqueue (applied)');
     expect(body.showForm.form.description).toContain('remove (shadow)');
-    expect(body.showForm.form.acceptLabel).toBe('Activate 5 draft rule(s)');
+    expect(body.showForm.form.description).toMatch(/Tokens used \(lifetime\): 1,500 in \/ 300 out/);
+    // Dashboard no longer triggers activation — that moved to Manage rules.
+    expect(body.showForm.form.acceptLabel).toBe('Close');
   });
 
   it('shows the dry-run preview for draft rules that have a stored result', async () => {
@@ -112,37 +126,58 @@ describe('POST /internal/menu/dashboard', () => {
   });
 });
 
-describe('POST /internal/form/dashboard-action', () => {
+// Phase 1.7b — dashboard is now read-only (audit Tier-2 #3 + #10).
+// The "Activate draft" flow lives in the new Manage rules menu now
+// (covered by routes-manage.test.ts in this same PR).
+describe('POST /internal/form/dashboard-action (read-only dashboard, Phase 1.7b)', () => {
   it('rejects a non-moderator', async () => {
-    const body = await (await call('/internal/form/dashboard-action', { activate: true })).json();
+    const body = await (await call('/internal/form/dashboard-action', { dismissOnboarding: true })).json();
     expect(body.showToast).toEqual({ text: 'Only moderators can use this.', appearance: 'neutral' });
   });
 
-  it('does nothing when the activate checkbox is off', async () => {
+  it('returns "Closed." when no flag is set', async () => {
     asMod();
-    const body = await (await call('/internal/form/dashboard-action', { activate: false })).json();
-    expect(body.showToast).toBe('No action taken.');
+    const body = await (await call('/internal/form/dashboard-action', {})).json();
+    expect(body.showToast).toBe('Closed.');
   });
 
-  it('reports when there is no draft to activate', async () => {
+  it('persists the onboarding-dismissed flag when ticked (Tier-3 #C)', async () => {
     asMod();
-    const body = await (await call('/internal/form/dashboard-action', { activate: true })).json();
-    expect(body.showToast).toBe('No draft to activate.');
+    const body = await (await call('/internal/form/dashboard-action', { dismissOnboarding: true })).json();
+    expect(body.showToast).toBe('Welcome intro dismissed.');
+    expect(await fakeRedis.get('testsub:onboarding:dismissed')).toBe('1');
+  });
+});
+
+describe('Dashboard onboarding + empty state (Phase 1.7b Tier-3 #C, Tier-2 #A)', () => {
+  it('shows the welcome card on first visit (no Redis flag)', async () => {
+    asMod();
+    const body = await (
+      await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
+    ).json();
+    expect(body.showForm.form.description).toContain('Welcome to vibe-mod');
+    expect(body.showForm.form.description).toContain('3 quick steps');
+    const fieldNames = body.showForm.form.fields.map((f: { name: string }) => f.name);
+    expect(fieldNames).toContain('dismissOnboarding');
   });
 
-  it('promotes the draft bundle to active and stamps activatedAt on each rule', async () => {
+  it('hides the welcome card once dismissed', async () => {
     asMod();
-    const seeded = seedStarterRules(123);
-    await fakeRedis.set('testsub:rules:draft', JSON.stringify(seeded));
+    await fakeRedis.set('testsub:onboarding:dismissed', '1');
+    const body = await (
+      await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
+    ).json();
+    expect(body.showForm.form.description).not.toContain('Welcome to vibe-mod');
+    expect(body.showForm.form.fields).toEqual([]);
+  });
 
-    const body = await (await call('/internal/form/dashboard-action', { activate: true })).json();
-    expect(body.showToast.appearance).toBe('success');
-    expect(body.showToast.text).toMatch(/Shadow mode is ON/i);
-
-    const active = JSON.parse((await fakeRedis.get('testsub:rules:active')) ?? '{}') as {
-      rules: Array<{ id: string; activatedAt?: number }>;
-    };
-    expect(active.rules.map((r) => r.id)).toEqual(seeded.rules.map((r) => r.id));
-    for (const r of active.rules) expect(typeof r.activatedAt).toBe('number');
+  it('emits a clear empty state when there are zero rules and zero recent actions (Tier-2 #A)', async () => {
+    asMod();
+    await fakeRedis.set('testsub:onboarding:dismissed', '1');
+    const body = await (
+      await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
+    ).json();
+    expect(body.showForm.form.description).toContain('No rules yet');
+    expect(body.showForm.form.description).toContain('vibe-mod: Compose rule');
   });
 });

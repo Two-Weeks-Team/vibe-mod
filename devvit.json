@@ -79,6 +79,13 @@
         "endpoint": "/internal/menu/dashboard"
       },
       {
+        "label": "vibe-mod: Manage rules",
+        "description": "Activate / pause / delete rules per-rule",
+        "forUserType": "moderator",
+        "location": ["subreddit"],
+        "endpoint": "/internal/menu/manage-rules"
+      },
+      {
         "label": "vibe-mod: Undo this action",
         "description": "Restore the post (rule-triggered removals only)",
         "forUserType": "moderator",
@@ -89,7 +96,10 @@
   },
   "forms": {
     "ruleComposerForm": "/internal/form/compose-rule-submit",
-    "dashboardForm": "/internal/form/dashboard-action"
+    "composeConfirmForm": "/internal/form/compose-confirm-submit",
+    "dashboardForm": "/internal/form/dashboard-action",
+    "manageRulesForm": "/internal/form/manage-rules-submit",
+    "manageDeleteConfirmForm": "/internal/form/manage-delete-confirm"
   },
   "triggers": {
     "onPostSubmit": "/internal/trigger/on-post-submit",
