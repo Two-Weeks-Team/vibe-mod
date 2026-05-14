@@ -188,10 +188,14 @@ export function registerDashboardRoutes(app: Hono): void {
     if (draft?.rules?.length) {
       const previewableRules = (draft?.rules ?? []).slice(0, 5);
       for (const r of previewableRules) {
-        // Pull the matching dry-run line by rule id (dryRunLines is "  <id>: ...").
-        const line = dryRunLines.find((l) => l.includes(r.id))?.trim() ?? 'Dry-run pending — re-open in 30s.';
+        // Pull the matching dry-run line by rule id. Use startsWith on the
+        // trimmed prefix so `r_rule` doesn't accidentally match `r_rule_2`
+        // (Gemini review on PR #51). dryRunLines look like "  <id>: ...".
+        const prefix = `${r.id}:`;
+        const line =
+          dryRunLines.find((l) => l.trimStart().startsWith(prefix))?.trim() ?? 'Dry-run pending — re-open in 30s.';
         // Drop the leading "<id>:" since the rule id is already the label.
-        const detail = line.replace(new RegExp(`^${r.id}:\\s*`), '');
+        const detail = line.startsWith(prefix) ? line.slice(prefix.length).trim() : line;
         addItemBlock(`dryRun_${r.id}`, `📝 ${r.name}`, detail);
       }
       const more = (draft?.rules.length ?? 0) - previewableRules.length;
