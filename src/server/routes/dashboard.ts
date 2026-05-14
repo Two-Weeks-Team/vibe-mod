@@ -6,7 +6,7 @@
 
 import type { Hono } from 'hono';
 import { redis } from '@devvit/web/server';
-import type { MenuItemRequest, UiResponse } from '@devvit/web/shared';
+import type { FormField, MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import { keys } from '../../shared/redis-keys';
 import { type RuleBundleType } from '../../shared/rule-schema';
 import { getCurrentSubredditName } from '../devvit-helpers';
@@ -105,55 +105,88 @@ export function registerDashboardRoutes(app: Hono): void {
     const totalRules = (active?.rules.length ?? 0) + (draft?.rules.length ?? 0);
     const isEmpty = totalRules === 0 && recent.length === 0;
 
-    const summary = [
-      ...(rpcOk
-        ? []
-        : [
-            '⚠ Plugin RPC unreachable (reddit/devvit#258 — OPEN platform bug).',
-            'Persistence is offline; this view reflects what redis would return.',
-            '',
-          ]),
-      ...(firstVisit
-        ? [
-            '👋 Welcome to vibe-mod. 3 quick steps:',
-            '   1. We seeded 5 starter rules — see them below.',
-            '   2. Open ⋯ → "vibe-mod: Manage rules" to activate one (shadow mode for 24h first).',
-            '   3. Open ⋯ → "vibe-mod: Compose rule" to write your own in plain English.',
-            '',
-          ]
-        : []),
-      ...(isEmpty
-        ? ['No rules yet — open the subreddit ⋯ menu → "vibe-mod: Compose rule" to write your first rule.', '']
-        : []),
-      `Active rules: ${active?.rules.length ?? 0}`,
-      `Draft rules: ${draft?.rules.length ?? 0}`,
-      `Recent actions: ${recent.length}`,
-      `Tokens used (lifetime): ${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out (~$${totalCost.toFixed(4)} on ${llmModel}).`,
-      ...(dryRunLines.length ? ['', 'Dry-run preview (draft rules):', ...dryRunLines] : []),
-      '',
-      'Recent actions:',
-      ...recent.slice(0, 10).map((r) => `  ${r.action} (${r.outcome}) — ${(r.ruleSourceNL ?? '').slice(0, 60)}…`),
-    ].join('\n');
+    // Phase 2c demo-recording UX clean-up — Devvit's modal `description`
+    // collapses every \n into a single soft-wrapping paragraph, so the
+    // previous one-big-string version produced the unreadable wall of
+    // text the user flagged in the recording. Splitting the same content
+    // into multiple disabled-paragraph fields gives Devvit a separate
+    // block per section, which it renders with proper spacing.
+    const fields: FormField[] = [];
+    const addBlock = (name: string, label: string, value: string) => {
+      if (!value.trim()) return;
+      fields.push({ name, label, type: 'paragraph', defaultValue: value, disabled: true });
+    };
+
+    if (!rpcOk) {
+      addBlock(
+        'rpcWarning',
+        '⚠ Plugin RPC unreachable',
+        'reddit/devvit#258 (OPEN platform bug). Persistence is offline; this view reflects what redis would return.',
+      );
+    }
+
+    if (firstVisit) {
+      addBlock(
+        'welcome',
+        '👋 Welcome to vibe-mod',
+        '3 quick steps:\n1. We seeded 5 starter rules — see them below.\n2. Open ⋯ → "vibe-mod: Manage rules" to activate one (shadow mode for 24h first).\n3. Open ⋯ → "vibe-mod: Compose rule" to write your own in plain English.',
+      );
+    }
+
+    if (isEmpty) {
+      addBlock(
+        'emptyState',
+        'No rules yet',
+        'Open the subreddit ⋯ menu → "vibe-mod: Compose rule" to write your first rule.',
+      );
+    }
+
+    addBlock(
+      'counts',
+      'At a glance',
+      `Active rules: ${active?.rules.length ?? 0}\nDraft rules: ${draft?.rules.length ?? 0}\nRecent actions: ${recent.length}`,
+    );
+
+    addBlock(
+      'tokenCost',
+      'Tokens used (lifetime)',
+      `${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out\n(~$${totalCost.toFixed(4)} on ${llmModel})`,
+    );
+
+    if (dryRunLines.length) {
+      addBlock('dryRunPreview', 'Dry-run preview (draft rules)', dryRunLines.join('\n'));
+    }
+
+    if (recent.length) {
+      addBlock(
+        'recentActions',
+        'Recent actions',
+        recent
+          .slice(0, 10)
+          .map((r) => `${r.action} (${r.outcome}) — ${(r.ruleSourceNL ?? '').slice(0, 60)}…`)
+          .join('\n'),
+      );
+    }
+
+    if (firstVisit) {
+      fields.push({
+        name: 'dismissOnboarding',
+        label: 'Dismiss the welcome intro for this sub',
+        type: 'boolean',
+        defaultValue: false,
+        helpText: 'Tick to hide the 3-step intro on future visits.',
+      });
+    }
 
     return c.json<UiResponse>({
       showForm: {
         name: 'dashboardForm',
         form: {
           title: 'vibe-mod Dashboard',
-          description: summary,
+          description: 'Read-only summary. Per-rule activation lives in "vibe-mod: Manage rules".',
           acceptLabel: 'Close',
           cancelLabel: firstVisit ? "Don't show intro again" : 'Cancel',
-          fields: firstVisit
-            ? [
-                {
-                  name: 'dismissOnboarding',
-                  label: 'Dismiss the welcome intro for this sub',
-                  type: 'boolean',
-                  defaultValue: false,
-                  helpText: 'Tick to hide the 3-step intro on future visits.',
-                },
-              ]
-            : [],
+          fields,
         },
       },
     });
