@@ -29,14 +29,17 @@ async function seedAudit(actionId: string, fields: Record<string, string>, score
   await fakeRedis.hSet(`testsub:audit:${actionId}`, fields);
 }
 
-// Helper: concatenate every visible label + paragraph value the dashboard
-// form renders, so the assertions still work against the Phase 2c
-// multi-block layout (was: one big string in `description`).
+// Helper: concatenate every visible label + paragraph value + helpText
+// the dashboard form renders, so the assertions still work against the
+// Phase 2c/2d multi-block layout (was: one big string in `description`,
+// then defaultValue blocks, now: helpText body — see dashboard.ts header
+// for the rationale).
 function dashTexts(body: any): string {
   return [
     body.showForm.form.description ?? '',
     ...body.showForm.form.fields.map(
-      (f: { label?: string; defaultValue?: unknown }) => `${f.label ?? ''}\n${String(f.defaultValue ?? '')}`,
+      (f: { label?: string; defaultValue?: unknown; helpText?: string }) =>
+        `${f.label ?? ''}\n${String(f.defaultValue ?? '')}\n${f.helpText ?? ''}`,
     ),
   ].join('\n');
 }
@@ -133,9 +136,11 @@ describe('POST /internal/menu/dashboard', () => {
       await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
     ).json();
     const text = dashTexts(body);
-    expect(text).toContain('Dry-run preview (draft rules)');
-    expect(text).toContain('r_new_account_fast_post: would match 1/10 recent post(s) → modqueue');
-    expect(text).toContain('r_wall_of_caps_comment: comment events; shadow mode it');
+    // Phase 2d: dry-run preview is now per-rule (one field per rule)
+    // instead of a single textarea. Each rule's helpText carries the
+    // "would match X/Y → action" line. The rule id is the label.
+    expect(text).toContain('would match 1/10 recent post(s) → modqueue');
+    expect(text).toContain('comment events; shadow mode it');
   });
 });
 

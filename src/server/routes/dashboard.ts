@@ -105,67 +105,121 @@ export function registerDashboardRoutes(app: Hono): void {
     const totalRules = (active?.rules.length ?? 0) + (draft?.rules.length ?? 0);
     const isEmpty = totalRules === 0 && recent.length === 0;
 
-    // Phase 2c demo-recording UX clean-up — Devvit's modal `description`
-    // collapses every \n into a single soft-wrapping paragraph, so the
-    // previous one-big-string version produced the unreadable wall of
-    // text the user flagged in the recording. Splitting the same content
-    // into multiple disabled-paragraph fields gives Devvit a separate
-    // block per section, which it renders with proper spacing.
+    // Phase 2d UX rework — Devvit renders `disabled paragraph` as a
+    // single-line scrolling textarea (multi-line content is hidden behind a
+    // tiny viewport), and the form's `description` collapses every \n into
+    // a single soft-wrap. Empirically (PR #51 experiment), the only
+    // cleanly-rendered multi-line surface is `helpText` on a field — but
+    // helpText also collapses \n, so we use `·` as a visible separator.
+    //
+    // Strategy:
+    //   - Short multi-value blocks (counts, token cost, welcome) → one
+    //     paragraph field with helpText carrying the inline-wrapped text.
+    //   - Long lists (recent actions, dry-run preview) → one field per
+    //     item, label = headline, helpText = detail. Capped at 5 items
+    //     with a "+N more" hint to keep the modal scrollable.
     const fields: FormField[] = [];
-    const addBlock = (name: string, label: string, value: string) => {
-      if (!value.trim()) return;
-      fields.push({ name, label, type: 'paragraph', defaultValue: value, disabled: true });
+
+    // helpText is the only Devvit field surface that wraps multi-line text
+    // legibly — disabled paragraph defaultValue is single-line truncated.
+    // \n still collapses in helpText, so caller passes a pre-joined string
+    // (e.g. items separated by `\n  ·  `).
+    const addInfoBlock = (name: string, label: string, body: string) => {
+      if (!body.trim()) return;
+      fields.push({ name, label, type: 'paragraph', defaultValue: '', disabled: true, helpText: body });
     };
 
+    // Per-item helper for long lists. Each item gets its own helpText-body
+    // field so the modal is browseable rule-by-rule / action-by-action.
+    const addItemBlock = (name: string, label: string, detail: string) => {
+      fields.push({ name, label, type: 'paragraph', defaultValue: '', disabled: true, helpText: detail });
+    };
+
+    const SEP = '  ·  ';
+
     if (!rpcOk) {
-      addBlock(
+      addInfoBlock(
         'rpcWarning',
         '⚠ Plugin RPC unreachable',
-        'reddit/devvit#258 (OPEN platform bug). Persistence is offline; this view reflects what redis would return.',
+        'reddit/devvit#258 (OPEN platform bug).' +
+          SEP +
+          'Persistence is offline; this view reflects what redis would return.',
       );
     }
 
     if (firstVisit) {
-      addBlock(
+      addInfoBlock(
         'welcome',
-        '👋 Welcome to vibe-mod',
-        '3 quick steps:\n1. We seeded 5 starter rules — see them below.\n2. Open ⋯ → "vibe-mod: Manage rules" to activate one (shadow mode for 24h first).\n3. Open ⋯ → "vibe-mod: Compose rule" to write your own in plain English.',
+        '👋 Welcome to vibe-mod — 3 quick steps',
+        '1. We seeded 5 starter rules — see them below.' +
+          SEP +
+          '2. Open ⋯ → "vibe-mod: Manage rules" to activate one (shadow mode for 24h first).' +
+          SEP +
+          '3. Open ⋯ → "vibe-mod: Compose rule" to write your own in plain English.',
       );
     }
 
     if (isEmpty) {
-      addBlock(
+      addInfoBlock(
         'emptyState',
         'No rules yet',
         'Open the subreddit ⋯ menu → "vibe-mod: Compose rule" to write your first rule.',
       );
     }
 
-    addBlock(
+    addInfoBlock(
       'counts',
       'At a glance',
-      `Active rules: ${active?.rules.length ?? 0}\nDraft rules: ${draft?.rules.length ?? 0}\nRecent actions: ${recent.length}`,
+      `Active rules: ${active?.rules.length ?? 0}` +
+        SEP +
+        `Draft rules: ${draft?.rules.length ?? 0}` +
+        SEP +
+        `Recent actions: ${recent.length}`,
     );
 
-    addBlock(
+    addInfoBlock(
       'tokenCost',
       'Tokens used (lifetime)',
-      `${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out\n(~$${totalCost.toFixed(4)} on ${llmModel})`,
+      `${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out (~$${totalCost.toFixed(4)} on ${llmModel})`,
     );
 
-    if (dryRunLines.length) {
-      addBlock('dryRunPreview', 'Dry-run preview (draft rules)', dryRunLines.join('\n'));
+    // Per-rule dry-run preview (top 5). One field per rule so each is
+    // browseable on its own row instead of crammed into a single textarea.
+    if (draft?.rules?.length) {
+      const previewableRules = (draft?.rules ?? []).slice(0, 5);
+      for (const r of previewableRules) {
+        // Pull the matching dry-run line by rule id (dryRunLines is "  <id>: ...").
+        const line = dryRunLines.find((l) => l.includes(r.id))?.trim() ?? 'Dry-run pending — re-open in 30s.';
+        // Drop the leading "<id>:" since the rule id is already the label.
+        const detail = line.replace(new RegExp(`^${r.id}:\\s*`), '');
+        addItemBlock(`dryRun_${r.id}`, `📝 ${r.name}`, detail);
+      }
+      const more = (draft?.rules.length ?? 0) - previewableRules.length;
+      if (more > 0) {
+        addInfoBlock(
+          'dryRunMore',
+          '+ more drafts',
+          `${more} more draft rule(s) — see "vibe-mod: Manage rules" for the full list.`,
+        );
+      }
     }
 
+    // Recent actions (top 5). Same per-item shape: one field per action.
     if (recent.length) {
-      addBlock(
-        'recentActions',
-        'Recent actions',
-        recent
-          .slice(0, 10)
-          .map((r) => `${r.action} (${r.outcome}) — ${(r.ruleSourceNL ?? '').slice(0, 60)}…`)
-          .join('\n'),
-      );
+      const previewable = recent.slice(0, 5);
+      for (let i = 0; i < previewable.length; i++) {
+        const r = previewable[i];
+        const headline = `${r.action} (${r.outcome})`;
+        const detail = (r.ruleSourceNL ?? '').slice(0, 200) || '(no source NL captured)';
+        addItemBlock(`recent_${i}`, headline, detail);
+      }
+      if (recent.length > previewable.length) {
+        addInfoBlock(
+          'recentMore',
+          '+ more actions',
+          `${recent.length - previewable.length} more action(s) in the last 30 days — full audit log retained server-side.`,
+        );
+      }
     }
 
     if (firstVisit) {
