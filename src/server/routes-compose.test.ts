@@ -151,6 +151,124 @@ describe('POST /internal/form/compose-rule-submit', () => {
     expect(fieldNames).toContain('clarificationAnswer');
   });
 
+  // ── Phase 1.6 (audit finding #1): suggestedAnswers → select field ──
+  it('renders LLM suggestedAnswers as a select field plus a free-text override', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
+    fakeFetch.mockResolvedValue(
+      openaiResponse({
+        needsClarification: true,
+        question: "What should count as 'brand-new account'?",
+        suggestedAnswers: ['under 24 hours', 'under 7 days', 'Both'],
+      }),
+    );
+    const body = await (
+      await call('/internal/form/compose-rule-submit', { rule: 'mod brand-new accounts', allowGuarded: false })
+    ).json();
+    const fields = body.showForm.form.fields as Array<{
+      name: string;
+      type: string;
+      options?: Array<{ label: string; value: string }>;
+      defaultValue?: unknown;
+    }>;
+    const select = fields.find((f) => f.name === 'clarificationAnswer');
+    expect(select?.type).toBe('select');
+    expect(select?.options).toEqual([
+      { label: 'under 24 hours', value: 'under 24 hours' },
+      { label: 'under 7 days', value: 'under 7 days' },
+      { label: 'Both', value: 'Both' },
+    ]);
+    expect(select?.defaultValue).toEqual(['under 24 hours']);
+    const other = fields.find((f) => f.name === 'clarificationAnswerOther');
+    expect(other?.type).toBe('paragraph');
+    // Allow ban/mute toggle now carries explanatory helpText (audit finding #4).
+    const guarded = fields.find((f) => f.name === 'allowGuarded');
+    expect((guarded as { helpText?: string }).helpText).toMatch(/ban\/mute/);
+  });
+
+  it('falls back to a free-text answer when the LLM clarification omits suggestedAnswers', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
+    fakeFetch.mockResolvedValue(
+      openaiResponse({ needsClarification: true, question: 'Which subreddit?' /* no suggestedAnswers */ }),
+    );
+    const body = await (
+      await call('/internal/form/compose-rule-submit', { rule: 'mod across subs', allowGuarded: false })
+    ).json();
+    const fields = body.showForm.form.fields as Array<{ name: string; type: string }>;
+    const answer = fields.find((f) => f.name === 'clarificationAnswer');
+    expect(answer?.type).toBe('paragraph');
+    expect(fields.find((f) => f.name === 'clarificationAnswerOther')).toBeUndefined();
+  });
+
+  it('unwraps the SELECTION-array clarificationAnswer when re-compiling', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
+    fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
+    await call('/internal/form/compose-rule-submit', {
+      rule: 'flag low karma posts',
+      allowGuarded: false,
+      // Devvit SELECTION returns string[] even for single-select. Server must unwrap.
+      clarificationAnswer: ['under 7 days'],
+    });
+    // Verify the OpenAI request included the unwrapped clarification text
+    // (we can only assert it via fakeFetch payload).
+    const lastCall = fakeFetch.mock.calls.at(-1)!;
+    const body = JSON.parse(lastCall[1].body as string) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const allContent = body.messages.map((m) => m.content).join(' ');
+    expect(allContent).toContain('under 7 days');
+    expect(allContent).not.toContain('["under 7 days"]'); // not raw array
+  });
+
+  it('uses clarificationAnswerOther when set, even if the select also has a value', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
+    fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
+    await call('/internal/form/compose-rule-submit', {
+      rule: 'flag low karma posts',
+      allowGuarded: false,
+      clarificationAnswer: ['under 24 hours'],
+      clarificationAnswerOther: 'precisely 90 days',
+    });
+    const lastCall = fakeFetch.mock.calls.at(-1)!;
+    const body = JSON.parse(lastCall[1].body as string) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const allContent = body.messages.map((m) => m.content).join(' ');
+    expect(allContent).toContain('precisely 90 days');
+    expect(allContent).not.toContain('under 24 hours');
+  });
+
+  // ── Phase 1.6 (audit finding #4): ban/mute helpText on compose form ──
+  it('compose form ban/mute toggle carries explanatory helpText', async () => {
+    asMod();
+    const body = await (
+      await call('/internal/menu/compose-rule', { location: 'subreddit', targetId: 't5_testsub' })
+    ).json();
+    const guarded = body.showForm.form.fields.find((f: { name: string }) => f.name === 'allowGuarded') as {
+      helpText?: string;
+    };
+    expect(guarded?.helpText).toMatch(/ban\/mute/);
+    expect(guarded?.helpText).toMatch(/explicitly says/);
+  });
+
+  // ── Phase 1.6 (audit finding #6): success toast carries rule summary + menu hint ──
+  it('success toast includes a 1-line rule summary and the View-rules menu hint', async () => {
+    asMod();
+    fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
+    fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
+    const body = await (
+      await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false })
+    ).json();
+    expect(body.showToast.appearance).toBe('success');
+    // 1-line summary like "→ post: modqueue"
+    expect(body.showToast.text).toMatch(/→\s*post[\w+]*:\s*modqueue/);
+    // Explicit menu pointer (Devvit toasts have no buttons → text path required)
+    expect(body.showToast.text).toContain('vibe-mod: View rules + log');
+  });
+
   it('compiles a valid rule → stores a draft, bumps the counter, schedules the dry-run', async () => {
     asMod();
     fakeSettings.get.mockImplementation(async (k: string) =>
