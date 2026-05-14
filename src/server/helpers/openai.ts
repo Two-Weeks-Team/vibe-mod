@@ -303,7 +303,16 @@ export async function callOpenAI(
     messages,
     max_completion_tokens: 600,
   });
-  const asciiSafeBody = rawBody.replace(/[-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+  // Match every non-ASCII char (>= 0x80). The explicit \u escapes are used
+  // because the previous form embedded the literal U+0080 and U+FFFF
+  // characters in the regex, which review tooling renders as /[-<box>]/ and
+  // mistakes for "matches only `-`" (Gemini review HIGH on PR #45).
+  // Behaviour is unchanged — every BMP non-ASCII codepoint still
+  // becomes \uXXXX.
+  const asciiSafeBody = rawBody.replace(
+    /[\u0080-\uFFFF]/g,
+    (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'),
+  );
 
   console.log('[vibe-mod] callOpenAI: body chars =', asciiSafeBody.length);
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {

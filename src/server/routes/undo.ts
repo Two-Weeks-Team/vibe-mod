@@ -37,16 +37,26 @@ export function registerUndoRoutes(app: Hono): void {
       });
     }
 
+    // Fetch all candidate audit entries in parallel (Gemini review HIGH on
+    // PR #45 flagged the previous sequential loop — 100 hGetAll calls in
+    // series can blow the menu handler's deadline). Once they've all
+    // returned, scan in original ZSet order to find the first applicable
+    // one — that preserves the "most recent first" behaviour of the
+    // original break-on-found loop.
+    const fetched = await Promise.allSettled(
+      recentIds.map((m) => redis.hGetAll(keys.auditEntry(subredditName, m.member as string))),
+    );
     let found: string | null = null;
-    for (const m of recentIds) {
-      try {
-        const h = await redis.hGetAll(keys.auditEntry(subredditName, m.member as string));
-        if (h.thingId === targetId && h.outcome === 'applied' && !h.rolledBack) {
-          found = m.member as string;
-          break;
-        }
-      } catch (err) {
-        console.warn('[vibe-mod] undo: redis.hGetAll(entry) threw — skipping:', describeErr(err));
+    for (let i = 0; i < recentIds.length; i++) {
+      const settled = fetched[i];
+      if (settled.status === 'rejected') {
+        console.warn('[vibe-mod] undo: redis.hGetAll(entry) failed — skipping:', describeErr(settled.reason));
+        continue;
+      }
+      const h = settled.value;
+      if (h.thingId === targetId && h.outcome === 'applied' && !h.rolledBack) {
+        found = recentIds[i].member as string;
+        break;
       }
     }
     if (!found)
