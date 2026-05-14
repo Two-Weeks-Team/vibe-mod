@@ -430,13 +430,22 @@ async def main() -> None:
             print(f"[verify]   round #{clarify_rounds_handled} done. still_clarify={still_clarify}")
 
         # ── 4 · expect Confirm form ─────────────────────────────────────
+        # Phase 2c rework: confirm form now carries `pendingId` (short
+        # session token) instead of the old `serializedRule` carrier. The
+        # actual compile state is in Redis under `composePending` — the
+        # form just needs to surface compiledSummary + the editInsteadOfSave
+        # toggle + the pendingId stash key.
         confirm_form = await dump_form(page)
         confirm_fields = {f.get('name', '') for f in confirm_form.get('fields', [])}
-        is_confirm = 'compiledSummary' in confirm_fields and 'serializedRule' in confirm_fields
+        is_confirm = (
+            'compiledSummary' in confirm_fields
+            and 'pendingId' in confirm_fields
+            and 'editInsteadOfSave' in confirm_fields
+        )
         report.add(StepResult(
             "confirm-form-renders",
             is_confirm,
-            f"compiledSummary+serializedRule present? {is_confirm}; fields={list(confirm_fields)}",
+            f"compiledSummary+pendingId+editInsteadOfSave present? {is_confirm}; fields={list(confirm_fields)}",
             await shot("07-confirm-form"),
             {"form": confirm_form},
         ))
@@ -445,9 +454,11 @@ async def main() -> None:
             saved = await submit_form(page, r"save|run dry-run|preview")
             report.add(StepResult("confirm-save-click", saved, "clicked Save"))
             toast_after_save = await wait_for_toast(page, timeout_ms=20_000)
+            # Phase 2c short-toast format: `Saved "X". Dry-run starts now.`
+            # (was: 'Compiled rule "X". → trigger: action. Dry-run started — open the menu → ...')
             report.add(StepResult(
                 "save-toast-success",
-                'compiled rule' in toast_after_save.lower() or 'success' in toast_after_save.lower(),
+                'saved' in toast_after_save.lower() or 'dry-run' in toast_after_save.lower(),
                 f"toast={toast_after_save!r}",
                 await shot("08-after-save"),
                 {"toast": toast_after_save},
@@ -464,13 +475,17 @@ async def main() -> None:
         if ok2:
             await page.locator('faceplate-form').first.wait_for(state="visible", timeout=10_000)
             dash_form = await dump_form(page)
-            # Devvit puts the description into the dialog body text, not into
-            # any single labelled element. Use dialogText (full text content
-            # of the dialog) as the source of truth.
-            dlg_text = (dash_form.get('dialogText') or '').lower()
-            has_onboarding = 'welcome to vibe-mod' in dlg_text or '3 quick steps' in dlg_text
-            has_empty_state = 'no rules yet' in dlg_text
-            has_token_cost = 'tokens used' in dlg_text and ('gpt-5.4' in dlg_text or 'gpt-5' in dlg_text)
+            # Phase 2c reshape: dashboard description split into per-section
+            # paragraph fields. Need to scan both the dialogText and every
+            # field label+value to find onboarding / empty-state / token cost.
+            corpus_parts = [(dash_form.get('dialogText') or '')]
+            for f in dash_form.get('fields', []):
+                corpus_parts.append(str(f.get('label') or ''))
+                corpus_parts.append(str(f.get('defaultValue') or ''))
+            corpus = ' '.join(corpus_parts).lower()
+            has_onboarding = 'welcome to vibe-mod' in corpus or '3 quick steps' in corpus
+            has_empty_state = 'no rules yet' in corpus
+            has_token_cost = 'tokens used' in corpus and ('gpt-5.4' in corpus or 'gpt-5' in corpus)
             report.add(StepResult(
                 "dashboard-onboarding-or-empty",
                 has_onboarding or has_empty_state,
@@ -482,7 +497,7 @@ async def main() -> None:
                 "dashboard-token-cost",
                 has_token_cost,
                 f"token_line_present={has_token_cost}",
-                extra={"dlg_excerpt": dlg_text[:600]},
+                extra={"corpus_excerpt": corpus[:600]},
             ))
 
         # ── 6 · Manage rules menu ──────────────────────────────────────
