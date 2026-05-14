@@ -228,6 +228,29 @@ describe('POST /internal/form/manage-delete-confirm', () => {
     expect(draft.rules.find((r: { id: string }) => r.id === targetA)).toBeUndefined();
   });
 
+  // Phase 1.7c (Gemini review #2 on PR #44): cap enforcement on apply.
+  it('refuses to persist when an action would push a bundle over the 50-rule cap', async () => {
+    asMod();
+    // Pre-load active with 50 rules (the cap). Try to pause a draft into it.
+    const seeded = seedStarterRules(900);
+    const cap50 = Array.from({ length: 50 }, (_v, i) => ({ ...seeded.rules[0], id: `r_cap_${i}` }));
+    await fakeRedis.set('testsub:rules:active', JSON.stringify({ ...seeded, rules: cap50 }));
+    await fakeRedis.set(
+      'testsub:rules:draft',
+      JSON.stringify({ ...seeded, rules: [{ ...seeded.rules[0], id: 'r_extra' }] }),
+    );
+    // activate-shadow → would push active to 51.
+    const body = await (
+      await call('/internal/form/manage-rules-submit', { action_r_extra: ['activate-shadow'] })
+    ).json();
+    expect(body.showToast.appearance).toBe('neutral');
+    expect(body.showToast.text).toMatch(/Rule cap exceeded/);
+    expect(body.showToast.text).toMatch(/active=51/);
+    // Original active bundle untouched.
+    const active = JSON.parse((await fakeRedis.get('testsub:rules:active'))!);
+    expect(active.rules).toHaveLength(50);
+  });
+
   it('returns a friendly error when the carried action map is malformed', async () => {
     asMod();
     const body = await (

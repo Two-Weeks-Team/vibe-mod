@@ -952,12 +952,21 @@ app.post('/internal/menu/manage-rules', async (c) => {
 
   // Pre-fetch dry-run summaries so the per-rule panel can show "would match
   // X/Y" inline rather than forcing the moderator to bounce to the dashboard.
+  // Parallelized — the previous serial loop multiplied Redis latency by the
+  // draft count (Gemini review #1, PR #44). With up to 50 drafts and ~10ms
+  // per round-trip the difference is ~500ms vs ~10ms wall time.
   const dryRunByRuleId = new Map<string, string>();
-  for (const r of drafts) {
+  const dryRunFetches = await Promise.allSettled(drafts.map((r) => redis.get(keys.dryrun(subredditName, r.id))));
+  for (let i = 0; i < drafts.length; i++) {
+    const r = drafts[i];
+    const settled = dryRunFetches[i];
+    if (settled.status === 'rejected') {
+      console.warn(`[vibe-mod] manage: redis.get(dryrun/${r.id}) threw:`, describeErr(settled.reason));
+      continue;
+    }
+    if (!settled.value) continue;
     try {
-      const rawDry = await redis.get(keys.dryrun(subredditName, r.id));
-      if (!rawDry) continue;
-      const d = JSON.parse(rawDry) as DryRunResult;
+      const d = JSON.parse(settled.value) as DryRunResult;
       if (d.status === 'ok') {
         dryRunByRuleId.set(
           r.id,
@@ -968,7 +977,7 @@ app.post('/internal/menu/manage-rules', async (c) => {
         dryRunByRuleId.set(r.id, `Dry-run: ${d.note ?? 'unavailable'}`);
       }
     } catch (err) {
-      console.warn(`[vibe-mod] manage: redis.get(dryrun/${r.id}) threw:`, describeErr(err));
+      console.warn(`[vibe-mod] manage: parse(dryrun/${r.id}) failed:`, describeErr(err));
     }
   }
 
@@ -2000,14 +2009,28 @@ async function applyManageActions(actions: Record<string, string>): Promise<{ pe
     }
   }
 
-  // Persist both bundles. Skip the write if nothing changed.
-  let persisted = true;
-  const writes: Array<Promise<unknown>> = [];
+  // Enforce the 50-rule cap on BOTH bundles before persistence (Gemini
+  // review #2, PR #44). pause / activate / unpause moves can push a
+  // bundle over the limit. Reject up front rather than persist a bundle
+  // that subsequent compose-rule-submit calls will refuse to extend.
+  if (activeRules.length > 50 || draftRules.length > 50) {
+    return {
+      persisted: false,
+      summary: `Rule cap exceeded after this change (active=${activeRules.length}, draft=${draftRules.length}, max=50). Delete a rule first, then retry.`,
+    };
+  }
+
+  // Use the currently configured model as the fallback (Gemini review #3,
+  // PR #44). The previous 'manage' literal broke estimateTokenCost() because
+  // it isn't a key in OPENAI_PRICING_USD_PER_TOKEN. We never *consume* this
+  // field for compile cost (manage doesn't call OpenAI), but the dashboard
+  // still shows "(~$X on <model>)" using whatever the last bundle wrote.
+  const fallbackModel = await readOpenaiModel();
   const draftBundle: RuleBundleType = {
     schemaVersion: '1.0.0',
     bundleVersion: (draft?.bundleVersion ?? 0) + 1,
     compiledAt: now,
-    llmModel: draft?.llmModel ?? 'manage',
+    llmModel: draft?.llmModel ?? fallbackModel,
     llmTokensIn: draft?.llmTokensIn ?? 0,
     llmTokensOut: draft?.llmTokensOut ?? 0,
     rules: draftRules,
@@ -2016,18 +2039,34 @@ async function applyManageActions(actions: Record<string, string>): Promise<{ pe
     schemaVersion: '1.0.0',
     bundleVersion: (active?.bundleVersion ?? 0) + 1,
     compiledAt: now,
-    llmModel: active?.llmModel ?? 'manage',
+    llmModel: active?.llmModel ?? fallbackModel,
     llmTokensIn: active?.llmTokensIn ?? 0,
     llmTokensOut: active?.llmTokensOut ?? 0,
     rules: activeRules,
   };
+
+  // Atomic dual-write via Devvit's MULTI/EXEC (Gemini review #4, PR #44).
+  // The previous Promise.all of two independent set()s could leave the two
+  // bundles out of sync if the second write failed (e.g. a paused rule
+  // disappears from active without showing up in draft). watch() also
+  // detects concurrent modifications by another moderator's manage submit
+  // and aborts — the toast tells the user to retry.
+  let persisted = true;
+  let aborted = false;
   try {
-    writes.push(redis.set(keys.rulesDraft(subredditName), JSON.stringify(draftBundle)));
-    writes.push(redis.set(keys.rulesActive(subredditName), JSON.stringify(activeBundle)));
-    await Promise.all(writes);
+    const txn = await redis.watch(keys.rulesActive(subredditName), keys.rulesDraft(subredditName));
+    await txn.multi();
+    await txn.set(keys.rulesActive(subredditName), JSON.stringify(activeBundle));
+    await txn.set(keys.rulesDraft(subredditName), JSON.stringify(draftBundle));
+    const result = await txn.exec();
+    // exec() returns null when the WATCH detected a concurrent change.
+    if (result == null) aborted = true;
   } catch (err) {
     persisted = false;
-    console.warn('[vibe-mod] manage/apply: redis.set threw:', describeErr(err));
+    console.warn('[vibe-mod] manage/apply: txn.exec threw:', describeErr(err));
+  }
+  if (aborted) {
+    persisted = false;
   }
 
   const parts: string[] = [];
@@ -2039,7 +2078,9 @@ async function applyManageActions(actions: Record<string, string>): Promise<{ pe
   if (parts.length === 0) parts.push('no matching rules to change');
   const summary = persisted
     ? `Applied: ${parts.join(', ')}.`
-    : `Could not persist (plugin RPC unreachable). Intended: ${parts.join(', ')}.`;
+    : aborted
+      ? `Another moderator changed the rules at the same time — your changes were not applied. Re-open Manage rules and try again. (Intended: ${parts.join(', ')}.)`
+      : `Could not persist (plugin RPC unreachable). Intended: ${parts.join(', ')}.`;
   return { persisted, summary };
 }
 
@@ -2171,7 +2212,13 @@ function humanizeRule(r: RuleType): string {
       return `${indent}ANY of:\n${inner}`;
     }
     if (t.not) return `${indent}NOT ${predicateLabel(t.not, '').trim()}`;
-    return `${indent}${t.fact} ${t.op} ${JSON.stringify(t.value)}`;
+    // Truncate long array / object values so the confirm form's
+    // compiledSummary doesn't bloat to thousands of characters when a
+    // rule uses `op: in` against a long allowlist (CodeRabbit review,
+    // PR #44).
+    const valueStr = JSON.stringify(t.value);
+    const display = valueStr.length > 100 ? valueStr.slice(0, 97) + '...' : valueStr;
+    return `${indent}${t.fact} ${t.op} ${display}`;
   };
   const actionLabel = (a: { action: string; params?: Record<string, unknown> }): string => {
     const p = a.params ?? {};
