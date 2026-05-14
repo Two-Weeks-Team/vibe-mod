@@ -115,7 +115,7 @@ per rule edit, on the moderator's sentence only. Runtime evaluation is pure, det
   accounts on OpenAI's daily-tier I/O-sharing program).
 - **Testing without Devvit's runtime:** we couldn't assume the Devvit emulator exists (it doesn't), so
   we built a reusable in-memory Devvit testkit (Redis + Reddit + scheduler + settings + fetch doubles),
-  168 unit/route tests calling `app.fetch()` directly, the official `@devvit/test` harness for the
+  211 unit/route tests calling `app.fetch()` directly, the official `@devvit/test` harness for the
   executor, fast-check property tests for the schema and evaluator, an `npm run acceptance` G1–G4 gate,
   and an `npm run replay` local event replayer. The actual Devvit routing/RPC is verified by
   `devvit playtest`.
@@ -194,24 +194,29 @@ per rule edit, on the moderator's sentence only. Runtime evaluation is pure, det
 · `redis` · `vite` · `vitest`
 
 **Try it out / links:**
-- Reddit App Directory listing: `<<https://developers.reddit.com/apps/vibe-mod — fill after publish>>`
+- Reddit App Directory listing: <https://developers.reddit.com/apps/vibe-mod>  *(URL is live; the listing flips from "Unlisted" to "Public" the moment `devvit publish --public` is approved.)*
 - GitHub (public, MIT): https://github.com/Two-Weeks-Team/vibe-mod
 - Project plan / design doc: https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod-final-plan.html
 - Terms of Service: https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod/tos.html
 - Privacy Policy: https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod/privacy.html
-- Demo video (YouTube, < 1 min, no music): `<<fill after recording>>`
+- Demo video (YouTube, < 1 min, no music): `<<TBD — record per docs/demo-scenario.md §3 then upload>>`
 
-**Media:** demo video + ≥ 3 screenshots — compose form, dry-run preview, dashboard/audit log
-(`<<capture from the live playtest/published app>>`).
+**Media:** demo video + 5 screenshots — Compose form, Clarify modal (with select options), Confirm form (humanizeRule output), Dashboard with onboarding card + dry-run preview, Manage rules per-rule action panel.
+*(Auto-capture script: `scripts/chrome-reddit-screenshots.py` — produces all 5 PNGs from a live r/SocialSeeding session via browser_cookie3 + Playwright. See `docs/demo-scenario.md` §3 for the cut-by-cut shot list.)*
 
 **Project Impact (which Reddit communities will use this & how):**
 > vibe-mod is built for the long tail of small-to-mid subreddits whose mod teams don't have an AutoMod
 > specialist — exactly the communities AutoMod's syntax leaves behind. We're running it first in
 > **r/SocialSeeding** (our own community, where vibe-mod handles "no spam / no low-effort / new-account"
-> rules), and `<<beta community 2>>`, `<<beta community 3>>` — places where the recurring need is "catch
-> low-effort / new-account / ALL-CAPS / link-spam posts": one English sentence in vibe-mod, a fiddly
-> regex block in AutoMod. Shadow mode + dry-run preview + 30-day undo mean a mod can adopt it without
-> betting their queue on a rule they wrote in 20 seconds.
+> rules), and `<<beta community 2 — USER TO FILL>>`, `<<beta community 3 — USER TO FILL>>` — places
+> where the recurring need is "catch low-effort / new-account / ALL-CAPS / link-spam posts": one English
+> sentence in vibe-mod, a fiddly regex block in AutoMod. Shadow mode + dry-run preview + 30-day undo
+> mean a mod can adopt it without betting their queue on a rule they wrote in 20 seconds.
+>
+> Phase 1.7b shipped a **per-rule control surface** (Manage rules menu) and a **compile-confirmation
+> form** that renders the deterministic JSON as English before saving — both directly aimed at the
+> "I want to write rules but I'm not a YAML person" mod we're building for.
+>
 > *(Add the real beta subreddits before submitting; keep each < 200 subscribers per the hackathon rule
 > for test/demo communities.)*
 
@@ -221,14 +226,14 @@ per rule edit, on the moderator's sentence only. Runtime evaluation is pure, det
 
 ## Pre-submission checklist
 
-- [ ] App published (`devvit publish --public`) and approved — or unlisted install link ready as fallback
-- [ ] `<<App Directory URL>>` filled in everywhere above + in root `README.md`
-- [ ] Demo video recorded (< 1 min, **no background music**, voiceover OK), uploaded to YouTube, captions (SRT)
-- [ ] ≥ 3 screenshots captured from the live app
-- [ ] `README.md` finalized (overview + installer instructions + changelog) — done in repo, re-check
-- [ ] ToS + Privacy URLs reachable
-- [ ] Project-Impact placeholders replaced with real communities
-- [ ] Submitted on Devpost with ≥ 8h buffer before 2026-05-27 18:00 PT
+- [ ] App published (`devvit publish --public`) and approved — or unlisted install link ready as fallback **(USER ACTION — D-9 = 2026-05-18)**
+- [x] App Directory URL stable — `https://developers.reddit.com/apps/vibe-mod` already live (filled in submission body and root `README.md`)
+- [ ] Demo video recorded (< 1 min, **no background music**, voiceover OK), uploaded to YouTube, captions (SRT) **(USER ACTION — record per `docs/demo-scenario.md` §3)**
+- [ ] 5 screenshots captured from the live app — auto-script `scripts/chrome-reddit-screenshots.py` (Phase 3, see this PR's siblings)
+- [x] `README.md` finalized (overview + installer instructions + changelog) — done in repo as of v0.0.41
+- [x] ToS + Privacy URLs reachable — both 200 on the GitHub Pages hosting
+- [ ] Project-Impact placeholders replaced with real beta communities — **USER decision (which 2-3 subreddits to list)**
+- [ ] Submitted on Devpost with ≥ 8h buffer before 2026-05-27 18:00 PT (D-day)
 
 ---
 
