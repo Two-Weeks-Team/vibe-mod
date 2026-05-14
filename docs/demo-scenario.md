@@ -42,25 +42,41 @@
    dryRunOnly         = true   # 안전 기본값
    ```
 
-## §3 60초 시나리오 (cut by cut)
+## §3 60초 시나리오 (cut by cut, Phase 1.7b UI 반영)
+
+> 변경: 가설 3 + Phase 1.7b UI. **Confirm form** (humanizeRule) + **Manage rules menu** (per-rule action) + **Dashboard onboarding** 가 영상에 자연스럽게 등장하면서 와우 추가.
 
 | Sec | 화면 / 액션 | 자막 (영문) | 노출되는 README 약속 |
 |---:|---|---|---|
-| 0:00–0:03 | r/SocialSeeding subreddit 메인. 우상단 ⋯ overflow menu open. "vibe-mod: Compose rule" highlight. | *Plain English → moderation rule.* | (intro) |
-| 0:03–0:05 | 클릭 → Compose form 열림. helpText example 가시. | — | — |
-| 0:05–0:13 | textarea에 입력: **`Send to mod queue posts from brand-new accounts under 50 chars`**. ban/mute toggle = OFF. "Compile + Preview" 버튼 highlight. | *AI compiles. But it asks before it guesses.* | #1 plain English |
-| 0:13–0:14 | 클릭 → loading spinner 짧게 | — | — |
-| 0:14–0:23 | **Clarify modal** open. Question: *"What should count as 'brand-new account'?"*. **Select field**으로 옵션 표시: `[ under 24 hours ▾ ]` `under 7 days` `Both`. (UX fix #1 적용 후) | **AI gives concrete options. (Wow #1)** | #1 + clarify |
-| 0:23–0:25 | "under 7 days" 선택. ban/mute toggle 그대로 OFF. "Re-compile" 버튼 클릭. | — | — |
-| 0:25–0:30 | 성공 toast (UX fix #6 적용 후): *"Compiled rule 'New-account short post → modqueue'. Will send to mod queue when account < 7 days. Dry-run started — open menu → View rules + log."* | *Deterministic JSON. Auditable.* | #1 deterministic |
-| 0:30–0:33 | ⋯ overflow menu 다시 열기 → "vibe-mod: View rules + log" 클릭 | — | — |
-| 0:33–0:42 | Dashboard 모달. 강조: `Dry-run preview (draft rules):  r_new_account_short_post: would match 3/20 recent post(s) → modqueue`. **3/20 숫자 highlight** (cursor + 노란 박스 overlay) | **Dry-run before activation. (Wow #2)** | #2 dry-run |
-| 0:42–0:45 | "Activate 1 draft rule(s)" toggle ON → submit. toast: *"Draft activated. Shadow mode is ON by default — promote per rule in next 24h."* (실제로는 setup §2.1에서 `shadowDurationHours=0` 이므로 즉시 live, 다음 trigger 발화부터 액션) | *Always shadow first. Then live.* | #3 shadow mode |
-| 0:45–0:48 | 화면 전환. 자막: **"Live now (shadowDurationHours=0). On a real post:"** | — | — |
-| 0:48–0:54 | (사전 작성한 테스트 post 페이지) ⋯ menu open → "vibe-mod: Undo this action" 클릭 → toast: *"Rolled back."* | **30-day undo on every action. (Wow #3)** | #4 rollback |
-| 0:54–0:60 | Outro card: **vibe-mod** logo + tagline *"Deterministic. Auditable. Reversible."* + URL `developers.reddit.com/apps/vibe-mod` | — | summary |
+| 0:00–0:02 | r/SocialSeeding 페이지 → ⋯ overflow → "vibe-mod: Compose rule" highlight. | *Plain English → moderation rule.* | (intro) |
+| 0:02–0:04 | 클릭 → Compose form 열림. helpText example 보임. | — | — |
+| 0:04–0:11 | textarea에 입력: **`Send to mod queue posts from brand-new accounts under 50 chars`**. allowGuarded=OFF. "Compile + Preview" 클릭. | *AI compiles. But it asks before it guesses.* | #1 plain English |
+| 0:11–0:18 | **Clarify modal** open. 헤더 *"(Round 2 of 3) What should count as 'brand-new account'?"* (turn counter). **Select field** options: `[ under 24 hours ▾ ]` `under 7 days` `Both`. **"under 7 days" 선택** → "Re-compile". | **AI gives concrete options. (Wow #1)** | #1 + clarify |
+| 0:18–0:28 | **Confirm form** open. compiledSummary read-only paragraph: *"When a new post is submitted, IF: ALL of: author.accountAgeHours lt 168, content.length lt 50; THEN: send to mod queue (note: ...). Compile cost: 1730 in / 88 out tokens (~$0.00031 on gpt-5.4-mini)."*. **"Save + run dry-run preview" 클릭**. | **Deterministic JSON, rendered as English. (Wow #2)** | #1 deterministic + #5/#6 cost |
+| 0:28–0:31 | toast: *"Compiled rule 'New-account short post'. → post: modqueue. Dry-run started — open the subreddit ⋯ menu → 'vibe-mod: View rules + log' to see preview."* | — | — |
+| 0:31–0:34 | ⋯ overflow → "vibe-mod: View rules + log" 클릭. | — | — |
+| 0:34–0:41 | Dashboard form. 첫 방문 → **3-step welcome card** (Phase 1.7b #C). 아래에 *"Dry-run preview (draft rules):  r_new_account_short_post: would match 3/20 recent post(s) → modqueue"* + *"Tokens used (lifetime): 1,730 in / 88 out (~$0.00031 on gpt-5.4-mini)"*. **3/20 highlight**. | **Dry-run + token cost transparency. (Wow #3)** | #2 dry-run |
+| 0:41–0:43 | Dashboard 닫고 → ⋯ overflow → "vibe-mod: Manage rules" 클릭. | — | — |
+| 0:43–0:50 | **Manage rules form**. group field per rule. 새로 만든 rule의 `Action` select에서 **"Activate immediately (skip shadow)"** 선택 → "Apply changes". toast: *"Applied: activated 1."* | *Per-rule control. Activate, pause, delete.* | #3 shadow mode (skip) |
+| 0:50–0:55 | 화면 전환. 자막: **"On a live post matching the rule:"**. 사전 작성한 테스트 post의 ⋯ menu → "vibe-mod: Undo this action" 클릭 → toast: *"Rolled back."* | **30-day undo on every action. (Wow #4)** | #4 rollback |
+| 0:55–0:60 | Outro card: **vibe-mod** logo + *"Deterministic. Auditable. Reversible."* + `developers.reddit.com/apps/vibe-mod` | — | summary |
 
-**총 60초** (실제 cut에 따라 ±2초). 와우 3개 + 약속 5/7 (#1, #2, #3, #4 + 메시지로 #5/#6 암시).
+**총 60초** (±2초). 와우 4개 + 약속 6/7 (#1 #2 #3 #4 + cost #6 + onboarding 친절도).
+
+### setup 변경 (영상 녹화 직전)
+
+기존 `shadowDurationHours=0` 대신 영상에서 **"Activate immediately (skip shadow)"** 메뉴 옵션을 사용하므로 setting을 건드릴 필요 없음. 더 정직한 데모 (production 그대로).
+
+여전히 필요한 setup:
+1. **테스트 post 1개** (rule에 매칭되는 짧은 post, 새 계정 작성)
+2. **Onboarding flag 초기화** — Manage rules 메뉴와 Dashboard onboarding을 fresh state로 보여주려면, 데모 직전 redis에서 `${sub}:onboarding:dismissed` 키 삭제 (또는 새 sub로 시연)
+
+### 새 Phase 1.7b/c UI hooks 영상 반영
+- **Confirm form** — 0:18-0:28 sec (10초). humanizeRule output이 시각적으로 명확.
+- **Manage rules menu** — 0:43-0:50 sec (7초). per-rule control surface 노출.
+- **Dashboard onboarding card** — 0:34-0:41 sec (7초). 첫 사용자 친절도 데모.
+- **Turn counter** — 0:11-0:18 sec (7초). "(Round 2 of 3)" 자막 자연스럽게.
+- **Token cost** — 0:18-0:28 sec + 0:34-0:41 sec. 두 번 노출.
 
 ## §4 자동 video 백업 (Phase 4 산출물)
 
