@@ -39,9 +39,20 @@ export function registerDashboardRoutes(app: Hono): void {
     try {
       const auditKey = keys.audit(subredditName);
       const recentIds = await redis.zRange(auditKey, 0, 19, { by: 'rank', reverse: true });
-      for (const m of recentIds) {
-        const h = await redis.hGetAll(keys.auditEntry(subredditName, m.member));
-        recent.push({ ...h, id: String(m.member) });
+      // Fetch all audit-entry hashes in parallel (Gemini review MED on PR
+      // #45). Sequential hGetAll multiplied Devvit RPC latency by the page
+      // size; with 20 entries and ~10ms per call that was a ~200ms tax on
+      // every dashboard open.
+      const fetched = await Promise.allSettled(
+        recentIds.map((m) => redis.hGetAll(keys.auditEntry(subredditName, m.member))),
+      );
+      for (let i = 0; i < recentIds.length; i++) {
+        const settled = fetched[i];
+        if (settled.status === 'fulfilled') {
+          recent.push({ ...settled.value, id: String(recentIds[i].member) });
+        } else {
+          console.warn('[vibe-mod] dashboard: redis.hGetAll(entry) failed — skipping:', describeErr(settled.reason));
+        }
       }
     } catch (err) {
       rpcOk = false;
@@ -49,12 +60,20 @@ export function registerDashboardRoutes(app: Hono): void {
     }
 
     // Dry-run results for the draft rules (written by /internal/scheduler/dry-run-replay).
+    // Parallel fetch — same rationale as the audit loop above.
+    const draftRules = draft?.rules ?? [];
+    const dryRunFetches = await Promise.allSettled(draftRules.map((r) => redis.get(keys.dryrun(subredditName, r.id))));
     const dryRunLines: string[] = [];
-    for (const r of draft?.rules ?? []) {
+    for (let i = 0; i < draftRules.length; i++) {
+      const r = draftRules[i];
+      const settled = dryRunFetches[i];
+      if (settled.status === 'rejected') {
+        console.warn(`[vibe-mod] dashboard: redis.get(dryrun/${r.id}) failed:`, describeErr(settled.reason));
+        continue;
+      }
+      if (!settled.value) continue;
       try {
-        const raw = await redis.get(keys.dryrun(subredditName, r.id));
-        if (!raw) continue;
-        const d = JSON.parse(raw) as DryRunResult;
+        const d = JSON.parse(settled.value) as DryRunResult;
         if (d.status === 'ok') {
           dryRunLines.push(
             `  ${r.id}: would match ${d.matched.length}/${d.sampledPosts} recent post(s)` +
@@ -64,7 +83,7 @@ export function registerDashboardRoutes(app: Hono): void {
           dryRunLines.push(`  ${r.id}: ${d.note ?? 'dry-run unavailable'}`);
         }
       } catch (err) {
-        console.warn(`[vibe-mod] dashboard: redis.get(dryrun/${r.id}) threw:`, describeErr(err));
+        console.warn(`[vibe-mod] dashboard: parse(dryrun/${r.id}) failed:`, describeErr(err));
       }
     }
 

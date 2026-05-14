@@ -122,10 +122,13 @@ export function registerTriggerRoutes(app: Hono): void {
     // call, no I/O at all. Previous versions (even with seeding deferred)
     // still failed with "context canceled" on install — likely a cold-start
     // vs trigger-deadline race on the first request to a 2 MB CJS bundle.
-    // Seeding moved to the FIRST trigger after install: on the first
-    // onPostSubmit/onCommentSubmit, if no active bundle exists, we seed
-    // in-band (cold-start has happened by then, and that handler is allowed
-    // to take longer than the install hook).
+    //
+    // Starter rules are seeded by the deferred /internal/scheduler/seed-on-install
+    // task (registered in devvit.json's `scheduler.tasks` block). Reddit's
+    // platform invokes that task after install once the bundle has warmed up.
+    // The submit triggers (on-post-submit / on-comment-submit) DO NOT seed
+    // — they fail-safe by returning ok when no bundle exists, so a sub
+    // running with the seed not yet landed simply takes no action that tick.
     return c.json<TriggerResponse>({ status: 'ok' });
   });
 

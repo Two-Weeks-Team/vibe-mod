@@ -260,121 +260,172 @@ export function registerManageRoutes(app: Hono): void {
 // Apply a manage-rules action map. Each id maps to one of:
 //   keep | activate-shadow | activate-now | promote | pause | delete
 //
-// Performs an atomic dual-write of the active + draft bundles using
-// redis.watch/multi/exec so a partial failure can't leave a rule absent
-// from both bundles (Gemini review #4, PR #44). Also enforces the 50-rule
-// cap on both bundles (Gemini review #2) and uses the configured openaiModel
-// as the bundle's `llmModel` fallback (Gemini review #3).
+// CAS loop (Gemini review HIGH on PR #45 fixed): WATCH must be established
+// BEFORE the GET that reads the data we're about to mutate, otherwise
+// optimistic locking provides no protection. We therefore retry up to
+// MAX_CAS_ATTEMPTS — each attempt does WATCH → GET → modify → MULTI → SET → EXEC,
+// and a null exec result means another moderator's manage call landed first.
+//
+// Also enforces the 50-rule cap on both bundles (Gemini review #2 PR #44)
+// and uses the configured openaiModel as the bundle's `llmModel` fallback
+// (Gemini review #3 PR #44).
+const MAX_CAS_ATTEMPTS = 3;
 async function applyManageActions(actions: Record<string, string>): Promise<{ persisted: boolean; summary: string }> {
   const subredditName = getCurrentSubredditName();
-  let active: RuleBundleType | null = null;
-  let draft: RuleBundleType | null = null;
-  try {
-    active = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'manage/apply/active');
-    draft = safeParseBundle(await redis.get(keys.rulesDraft(subredditName)), 'manage/apply/draft');
-  } catch (err) {
-    console.warn('[vibe-mod] manage/apply: redis.get(rules) threw:', describeErr(err));
-    return {
-      persisted: false,
-      summary: 'Plugin RPC unreachable (reddit/devvit#258). No changes applied.',
-    };
-  }
-
-  const draftRules: RuleType[] = (draft?.rules ?? []).slice();
-  const activeRules: RuleType[] = (active?.rules ?? []).slice();
-  const now = Date.now();
+  const activeKey = keys.rulesActive(subredditName);
+  const draftKey = keys.rulesDraft(subredditName);
+  const fallbackModel = await readOpenaiModel();
 
   let activated = 0;
   let promoted = 0;
   let paused = 0;
   let deleted = 0;
   let kept = 0;
-
-  for (const [id, decision] of Object.entries(actions)) {
-    if (decision === 'keep') {
-      kept++;
-      continue;
-    }
-    const inDraftIdx = draftRules.findIndex((r) => r.id === id);
-    const inActiveIdx = activeRules.findIndex((r) => r.id === id);
-
-    if (decision === 'activate-shadow' || decision === 'activate-now') {
-      if (inDraftIdx < 0) continue;
-      const r = draftRules[inDraftIdx];
-      r.shadow = decision === 'activate-shadow';
-      r.activatedAt = now;
-      const existing = activeRules.findIndex((x) => x.id === id);
-      if (existing >= 0) activeRules[existing] = r;
-      else activeRules.push(r);
-      draftRules.splice(inDraftIdx, 1);
-      activated++;
-    } else if (decision === 'promote') {
-      if (inActiveIdx < 0) continue;
-      const r = activeRules[inActiveIdx];
-      if (r.shadow) {
-        r.shadow = false;
-        promoted++;
-      }
-    } else if (decision === 'pause') {
-      if (inActiveIdx < 0) continue;
-      const r = activeRules[inActiveIdx];
-      r.shadow = true;
-      const existing = draftRules.findIndex((x) => x.id === id);
-      if (existing >= 0) draftRules[existing] = r;
-      else draftRules.push(r);
-      activeRules.splice(inActiveIdx, 1);
-      paused++;
-    } else if (decision === 'delete') {
-      if (inDraftIdx >= 0) draftRules.splice(inDraftIdx, 1);
-      if (inActiveIdx >= 0) activeRules.splice(inActiveIdx, 1);
-      if (inDraftIdx >= 0 || inActiveIdx >= 0) deleted++;
-    }
-  }
-
-  if (activeRules.length > 50 || draftRules.length > 50) {
-    return {
-      persisted: false,
-      summary: `Rule cap exceeded after this change (active=${activeRules.length}, draft=${draftRules.length}, max=50). Delete a rule first, then retry.`,
-    };
-  }
-
-  const fallbackModel = await readOpenaiModel();
-  const draftBundle: RuleBundleType = {
-    schemaVersion: '1.0.0',
-    bundleVersion: (draft?.bundleVersion ?? 0) + 1,
-    compiledAt: now,
-    llmModel: draft?.llmModel ?? fallbackModel,
-    llmTokensIn: draft?.llmTokensIn ?? 0,
-    llmTokensOut: draft?.llmTokensOut ?? 0,
-    rules: draftRules,
-  };
-  const activeBundle: RuleBundleType = {
-    schemaVersion: '1.0.0',
-    bundleVersion: (active?.bundleVersion ?? 0) + 1,
-    compiledAt: now,
-    llmModel: active?.llmModel ?? fallbackModel,
-    llmTokensIn: active?.llmTokensIn ?? 0,
-    llmTokensOut: active?.llmTokensOut ?? 0,
-    rules: activeRules,
-  };
-
-  let persisted = true;
   let aborted = false;
-  try {
-    const txn = await redis.watch(keys.rulesActive(subredditName), keys.rulesDraft(subredditName));
-    await txn.multi();
-    await txn.set(keys.rulesActive(subredditName), JSON.stringify(activeBundle));
-    await txn.set(keys.rulesDraft(subredditName), JSON.stringify(draftBundle));
-    const result = await txn.exec();
-    if (result == null) aborted = true;
-  } catch (err) {
-    persisted = false;
-    console.warn('[vibe-mod] manage/apply: txn.exec threw:', describeErr(err));
-  }
-  if (aborted) {
-    persisted = false;
+  let lastErr: unknown;
+  let lastSummary = '';
+
+  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+    activated = promoted = paused = deleted = kept = 0;
+    aborted = false;
+
+    let txn;
+    try {
+      // Step 1 — WATCH first. From this point on, any external write to
+      // either key flips EXEC's result to null and we'll retry.
+      txn = await redis.watch(activeKey, draftKey);
+    } catch (err) {
+      console.warn('[vibe-mod] manage/apply: redis.watch threw:', describeErr(err));
+      return { persisted: false, summary: 'Plugin RPC unreachable (reddit/devvit#258). No changes applied.' };
+    }
+
+    let active: RuleBundleType | null = null;
+    let draft: RuleBundleType | null = null;
+    try {
+      // Step 2 — read the current values *after* WATCH is established. We
+      // use the regular `redis.get` (not `txn.get`, which queues into the
+      // transaction and returns a chainable TxClientLike, not the value).
+      // WATCH is already in place, so any external write to either key
+      // between here and EXEC will flip exec() to null and trigger the
+      // CAS retry below.
+      active = safeParseBundle(await redis.get(activeKey), 'manage/apply/active');
+      draft = safeParseBundle(await redis.get(draftKey), 'manage/apply/draft');
+    } catch (err) {
+      try {
+        await txn.discard();
+      } catch {
+        /* ignore */
+      }
+      console.warn('[vibe-mod] manage/apply: redis.get threw:', describeErr(err));
+      return { persisted: false, summary: 'Plugin RPC unreachable (reddit/devvit#258). No changes applied.' };
+    }
+
+    const draftRules: RuleType[] = (draft?.rules ?? []).slice();
+    const activeRules: RuleType[] = (active?.rules ?? []).slice();
+    const now = Date.now();
+
+    for (const [id, decision] of Object.entries(actions)) {
+      if (decision === 'keep') {
+        kept++;
+        continue;
+      }
+      const inDraftIdx = draftRules.findIndex((r) => r.id === id);
+      const inActiveIdx = activeRules.findIndex((r) => r.id === id);
+
+      if (decision === 'activate-shadow' || decision === 'activate-now') {
+        if (inDraftIdx < 0) continue;
+        const r = draftRules[inDraftIdx];
+        r.shadow = decision === 'activate-shadow';
+        r.activatedAt = now;
+        const existing = activeRules.findIndex((x) => x.id === id);
+        if (existing >= 0) activeRules[existing] = r;
+        else activeRules.push(r);
+        draftRules.splice(inDraftIdx, 1);
+        activated++;
+      } else if (decision === 'promote') {
+        if (inActiveIdx < 0) continue;
+        const r = activeRules[inActiveIdx];
+        if (r.shadow) {
+          r.shadow = false;
+          promoted++;
+        }
+      } else if (decision === 'pause') {
+        if (inActiveIdx < 0) continue;
+        const r = activeRules[inActiveIdx];
+        r.shadow = true;
+        const existing = draftRules.findIndex((x) => x.id === id);
+        if (existing >= 0) draftRules[existing] = r;
+        else draftRules.push(r);
+        activeRules.splice(inActiveIdx, 1);
+        paused++;
+      } else if (decision === 'delete') {
+        if (inDraftIdx >= 0) draftRules.splice(inDraftIdx, 1);
+        if (inActiveIdx >= 0) activeRules.splice(inActiveIdx, 1);
+        if (inDraftIdx >= 0 || inActiveIdx >= 0) deleted++;
+      }
+    }
+
+    if (activeRules.length > 50 || draftRules.length > 50) {
+      try {
+        await txn.discard();
+      } catch {
+        /* ignore */
+      }
+      return {
+        persisted: false,
+        summary: `Rule cap exceeded after this change (active=${activeRules.length}, draft=${draftRules.length}, max=50). Delete a rule first, then retry.`,
+      };
+    }
+
+    const draftBundle: RuleBundleType = {
+      schemaVersion: '1.0.0',
+      bundleVersion: (draft?.bundleVersion ?? 0) + 1,
+      compiledAt: now,
+      llmModel: draft?.llmModel ?? fallbackModel,
+      llmTokensIn: draft?.llmTokensIn ?? 0,
+      llmTokensOut: draft?.llmTokensOut ?? 0,
+      rules: draftRules,
+    };
+    const activeBundle: RuleBundleType = {
+      schemaVersion: '1.0.0',
+      bundleVersion: (active?.bundleVersion ?? 0) + 1,
+      compiledAt: now,
+      llmModel: active?.llmModel ?? fallbackModel,
+      llmTokensIn: active?.llmTokensIn ?? 0,
+      llmTokensOut: active?.llmTokensOut ?? 0,
+      rules: activeRules,
+    };
+
+    try {
+      // Step 3 — MULTI + SET + EXEC. EXEC returns null iff a watched key
+      // changed between WATCH and now → loop and retry.
+      await txn.multi();
+      await txn.set(activeKey, JSON.stringify(activeBundle));
+      await txn.set(draftKey, JSON.stringify(draftBundle));
+      const result = await txn.exec();
+      if (result == null) {
+        aborted = true;
+        continue; // retry
+      }
+    } catch (err) {
+      lastErr = err;
+      console.warn('[vibe-mod] manage/apply: txn.exec threw:', describeErr(err));
+      lastSummary = 'Could not persist (plugin RPC unreachable).';
+      break; // not a contention issue, no point retrying
+    }
+
+    // Successful commit — exit retry loop.
+    const parts: string[] = [];
+    if (activated) parts.push(`activated ${activated}`);
+    if (promoted) parts.push(`promoted ${promoted}`);
+    if (paused) parts.push(`paused ${paused}`);
+    if (deleted) parts.push(`deleted ${deleted}`);
+    if (parts.length === 0 && kept > 0) parts.push(`kept ${kept} (no other action)`);
+    if (parts.length === 0) parts.push('no matching rules to change');
+    return { persisted: true, summary: `Applied: ${parts.join(', ')}.` };
   }
 
+  // Reached only on (a) all CAS attempts contended out, or (b) txn.exec threw.
   const parts: string[] = [];
   if (activated) parts.push(`activated ${activated}`);
   if (promoted) parts.push(`promoted ${promoted}`);
@@ -382,10 +433,14 @@ async function applyManageActions(actions: Record<string, string>): Promise<{ pe
   if (deleted) parts.push(`deleted ${deleted}`);
   if (parts.length === 0 && kept > 0) parts.push(`kept ${kept} (no other action)`);
   if (parts.length === 0) parts.push('no matching rules to change');
-  const summary = persisted
-    ? `Applied: ${parts.join(', ')}.`
-    : aborted
-      ? `Another moderator changed the rules at the same time — your changes were not applied. Re-open Manage rules and try again. (Intended: ${parts.join(', ')}.)`
-      : `Could not persist (plugin RPC unreachable). Intended: ${parts.join(', ')}.`;
-  return { persisted, summary };
+  if (aborted) {
+    return {
+      persisted: false,
+      summary: `Another moderator changed the rules ${MAX_CAS_ATTEMPTS} times in a row — your changes were not applied. Re-open Manage rules and try again. (Intended: ${parts.join(', ')}.)`,
+    };
+  }
+  return {
+    persisted: false,
+    summary: `${lastSummary} Intended: ${parts.join(', ')}. (${describeErr(lastErr)['message'] ?? ''})`,
+  };
 }
