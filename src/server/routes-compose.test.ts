@@ -386,18 +386,19 @@ describe('POST /internal/form/compose-rule-submit', () => {
     expect(ruleField.disabled).toBeFalsy();
   });
 
-  // ── Phase 1.6 (audit finding #6): success toast carries rule summary + menu hint ──
-  // After Phase 1.7b, the toast comes from /compose-confirm-submit (not the
-  // compose-rule-submit handler), but the wording lives in
-  // persistRuleAndStartDryRun() so the assertions still apply to the saved toast.
-  it('success toast includes a 1-line rule summary and the View-rules menu hint', async () => {
+  // ── Phase 2c demo-recording UX clean-up: success toast is short ──
+  // The previous wording packed 4 clauses into one line and Devvit's toast
+  // truncated mid-sentence in the recording. The compose-confirm form
+  // already shows the full rule + cost so the toast just needs to confirm
+  // what happened.
+  it('success toast is short and names the rule that was saved', async () => {
     asMod();
     fakeSettings.get.mockImplementation(async (k: string) => (k === 'openaiApiKey' ? 'sk-dev' : undefined));
     fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
     const { saveBody } = await compileAndConfirm(VALID_COMPILED.sourceNL, false);
     expect(saveBody.showToast.appearance).toBe('success');
-    expect(saveBody.showToast.text).toMatch(/→\s*post[\w+]*:\s*modqueue/);
-    expect(saveBody.showToast.text).toContain('vibe-mod: View rules + log');
+    expect(saveBody.showToast.text).toContain('Flag low-karma posts');
+    expect(saveBody.showToast.text.length).toBeLessThan(120); // Devvit toast budget
   });
 
   it('compiles a valid rule → shows confirm form → on Save: stores draft, bumps counter, schedules dry-run', async () => {
@@ -407,24 +408,48 @@ describe('POST /internal/form/compose-rule-submit', () => {
     );
     fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
 
-    const { confirmFormBody, saveBody } = await compileAndConfirm(VALID_COMPILED.sourceNL, false);
-    // Phase 1.7b (audit finding #2): compile-rule-submit returns a confirm form,
-    // not a success toast. Persistence happens on /compose-confirm-submit.
+    // Phase 1.7b + Phase 2c (audit finding #2): compile-rule-submit returns
+    // a confirm form, not a success toast. The form now carries a single
+    // short pendingId — the actual compile state lives under a Redis key
+    // (audit finding #B from the demo recording — internal carriers were
+    // bloating the modal). We run the two steps manually here so we can
+    // assert on the pending entry between them.
+    const composeRes = await call('/internal/form/compose-rule-submit', {
+      rule: VALID_COMPILED.sourceNL,
+      allowGuarded: false,
+    });
+    const confirmFormBody = await composeRes.json();
     expect(confirmFormBody.showForm.name).toBe('composeConfirmForm');
     expect(confirmFormBody.showForm.form.title).toContain('Flag low-karma posts');
-    // The form embeds the compiled rule + token counts as state carriers.
     const fieldsByName = Object.fromEntries(
       (confirmFormBody.showForm.form.fields as Array<{ name: string; defaultValue: unknown }>).map((f) => [
         f.name,
         f.defaultValue,
       ]),
     );
-    expect(fieldsByName.serializedRule).toContain('r_low_karma_flag');
-    expect(fieldsByName.llmModel).toBe('gpt-5.4-nano');
+    expect(fieldsByName.compiledSummary).toContain('Flag low-karma posts');
+    expect(typeof fieldsByName.pendingId).toBe('string');
+    expect((fieldsByName.pendingId as string).length).toBeGreaterThan(0);
+    // No more raw internal carriers in the modal.
+    expect(fieldsByName.serializedRule).toBeUndefined();
+    expect(fieldsByName.llmModel).toBeUndefined();
+    expect(fieldsByName.usingBYOK).toBeUndefined();
+    // The pending entry should round-trip the model the test stubbed.
+    const pendingJson = JSON.parse((await fakeRedis.get(`testsub:compose:pending:${fieldsByName.pendingId}`))!);
+    expect(pendingJson.llmModel).toBe('gpt-5.4-nano');
+    expect(pendingJson.validated.id).toBe('r_low_karma_flag');
 
-    // After Save: draft persisted, counter bumped, dry-run scheduled.
+    // Now run Save — pending entry gets consumed, draft persisted.
+    const savePayload: Record<string, unknown> = {};
+    for (const f of confirmFormBody.showForm.form.fields as Array<{ name: string; defaultValue: unknown }>) {
+      savePayload[f.name] = f.defaultValue;
+    }
+    savePayload.editInsteadOfSave = false;
+    const saveRes = await call('/internal/form/compose-confirm-submit', savePayload);
+    const saveBody = await saveRes.json();
     expect(saveBody.showToast.appearance).toBe('success');
     expect(saveBody.showToast.text).toContain('Flag low-karma posts');
+    expect(await fakeRedis.get(`testsub:compose:pending:${fieldsByName.pendingId}`)).toBeUndefined();
 
     const draft = JSON.parse((await fakeRedis.get('testsub:rules:draft'))!);
     expect(draft.rules).toHaveLength(1);

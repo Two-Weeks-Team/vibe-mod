@@ -29,6 +29,18 @@ async function seedAudit(actionId: string, fields: Record<string, string>, score
   await fakeRedis.hSet(`testsub:audit:${actionId}`, fields);
 }
 
+// Helper: concatenate every visible label + paragraph value the dashboard
+// form renders, so the assertions still work against the Phase 2c
+// multi-block layout (was: one big string in `description`).
+function dashTexts(body: any): string {
+  return [
+    body.showForm.form.description ?? '',
+    ...body.showForm.form.fields.map(
+      (f: { label?: string; defaultValue?: unknown }) => `${f.label ?? ''}\n${String(f.defaultValue ?? '')}`,
+    ),
+  ].join('\n');
+}
+
 describe('POST /internal/menu/dashboard', () => {
   it('rejects a non-moderator', async () => {
     const body = await (
@@ -43,8 +55,9 @@ describe('POST /internal/menu/dashboard', () => {
       await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
     ).json();
     expect(body.showForm.name).toBe('dashboardForm');
-    expect(body.showForm.form.description).toContain('Active rules: 0');
-    expect(body.showForm.form.description).toContain('Draft rules: 0');
+    const text = dashTexts(body);
+    expect(text).toContain('Active rules: 0');
+    expect(text).toContain('Draft rules: 0');
     expect(body.showForm.form.acceptLabel).toBe('Close');
   });
 
@@ -78,12 +91,13 @@ describe('POST /internal/menu/dashboard', () => {
     const body = await (
       await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
     ).json();
-    expect(body.showForm.form.description).toContain('Active rules: 2');
-    expect(body.showForm.form.description).toContain('Draft rules: 5');
-    expect(body.showForm.form.description).toContain('Recent actions: 2');
-    expect(body.showForm.form.description).toContain('modqueue (applied)');
-    expect(body.showForm.form.description).toContain('remove (shadow)');
-    expect(body.showForm.form.description).toMatch(/Tokens used \(lifetime\): 1,500 in \/ 300 out/);
+    const text = dashTexts(body);
+    expect(text).toContain('Active rules: 2');
+    expect(text).toContain('Draft rules: 5');
+    expect(text).toContain('Recent actions: 2');
+    expect(text).toContain('modqueue (applied)');
+    expect(text).toContain('remove (shadow)');
+    expect(text).toMatch(/1,500 in \/ 300 out/);
     // Dashboard no longer triggers activation — that moved to Manage rules.
     expect(body.showForm.form.acceptLabel).toBe('Close');
   });
@@ -118,11 +132,10 @@ describe('POST /internal/menu/dashboard', () => {
     const body = await (
       await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
     ).json();
-    expect(body.showForm.form.description).toContain('Dry-run preview (draft rules):');
-    expect(body.showForm.form.description).toContain(
-      'r_new_account_fast_post: would match 1/10 recent post(s) → modqueue',
-    );
-    expect(body.showForm.form.description).toContain('r_wall_of_caps_comment: comment events; shadow mode it');
+    const text = dashTexts(body);
+    expect(text).toContain('Dry-run preview (draft rules)');
+    expect(text).toContain('r_new_account_fast_post: would match 1/10 recent post(s) → modqueue');
+    expect(text).toContain('r_wall_of_caps_comment: comment events; shadow mode it');
   });
 });
 
@@ -155,8 +168,9 @@ describe('Dashboard onboarding + empty state (Phase 1.7b Tier-3 #C, Tier-2 #A)',
     const body = await (
       await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
     ).json();
-    expect(body.showForm.form.description).toContain('Welcome to vibe-mod');
-    expect(body.showForm.form.description).toContain('3 quick steps');
+    const text = dashTexts(body);
+    expect(text).toContain('Welcome to vibe-mod');
+    expect(text).toContain('3 quick steps');
     const fieldNames = body.showForm.form.fields.map((f: { name: string }) => f.name);
     expect(fieldNames).toContain('dismissOnboarding');
   });
@@ -167,8 +181,11 @@ describe('Dashboard onboarding + empty state (Phase 1.7b Tier-3 #C, Tier-2 #A)',
     const body = await (
       await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
     ).json();
-    expect(body.showForm.form.description).not.toContain('Welcome to vibe-mod');
-    expect(body.showForm.form.fields).toEqual([]);
+    const text = dashTexts(body);
+    expect(text).not.toContain('Welcome to vibe-mod');
+    // No `dismissOnboarding` toggle once the user has already dismissed it.
+    const fieldNames = body.showForm.form.fields.map((f: { name: string }) => f.name);
+    expect(fieldNames).not.toContain('dismissOnboarding');
   });
 
   it('emits a clear empty state when there are zero rules and zero recent actions (Tier-2 #A)', async () => {
@@ -177,7 +194,8 @@ describe('Dashboard onboarding + empty state (Phase 1.7b Tier-3 #C, Tier-2 #A)',
     const body = await (
       await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
     ).json();
-    expect(body.showForm.form.description).toContain('No rules yet');
-    expect(body.showForm.form.description).toContain('vibe-mod: Compose rule');
+    const text = dashTexts(body);
+    expect(text).toContain('No rules yet');
+    expect(text).toContain('vibe-mod: Compose rule');
   });
 });
