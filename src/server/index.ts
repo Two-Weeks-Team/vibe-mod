@@ -23,6 +23,7 @@ import type {
   TriggerResponse,
   SettingsValidationRequest,
   SettingsValidationResponse,
+  FormField,
 } from '@devvit/web/shared';
 import {
   reddit,
@@ -265,6 +266,7 @@ app.post('/internal/menu/compose-rule', async (c) => {
             label: 'Allow this rule to ban/mute (otherwise removes only)',
             type: 'boolean',
             defaultValue: false,
+            helpText: ALLOW_GUARDED_HELP,
           },
         ],
       },
@@ -280,11 +282,21 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     return c.json<UiResponse>({ showToast: { text: 'Only moderators can use this.', appearance: 'neutral' } });
   }
 
-  const { rule, allowGuarded, clarificationAnswer } = await c.req.json<{
+  const raw = await c.req.json<{
     rule: string;
     allowGuarded: boolean;
-    clarificationAnswer?: string;
+    clarificationAnswer?: string | string[];
+    clarificationAnswerOther?: string | string[];
   }>();
+  const rule = raw.rule;
+  const allowGuarded = !!raw.allowGuarded;
+  // Clarification answer can come from either (a) the select field
+  // (`clarificationAnswer`, an array per Devvit SELECTION semantics) or
+  // (b) the free-text override (`clarificationAnswerOther`). The override
+  // wins when non-empty so the user can always escape the suggested options.
+  const otherAnswer = unwrapFormString(raw.clarificationAnswerOther);
+  const selectedAnswer = unwrapFormString(raw.clarificationAnswer);
+  const clarificationAnswer = otherAnswer || selectedAnswer;
 
   if (!rule?.trim()) {
     return c.json<UiResponse>({ showToast: { text: 'Please type a rule.', appearance: 'neutral' } });
@@ -390,8 +402,63 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
     return c.json<UiResponse>({ showToast: { text: userMsg, appearance: 'neutral' } });
   }
 
-  // Clarification path — sends user back to form with answer field, NOT concatenation.
+  // Clarification path — sends user back to form with answer field, NOT
+  // concatenation. When the LLM provided structured `suggestedAnswers` we
+  // render them as a dropdown (audit finding #1) so the moderator can pick
+  // the intended option in one click instead of paraphrasing the question.
+  // The free-text "other" field is always present as an override / escape
+  // hatch — `compose-rule-submit` prefers it when non-empty.
   if (isClarification(compiled)) {
+    const suggested = Array.isArray(compiled.suggestedAnswers)
+      ? compiled.suggestedAnswers
+          .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+          .map((s) => s.trim())
+          .slice(0, 8)
+      : [];
+
+    const fields: FormField[] = [
+      {
+        name: 'rule',
+        label: 'Original rule (do not edit)',
+        type: 'paragraph',
+        defaultValue: rule,
+        disabled: true,
+      },
+    ];
+
+    if (suggested.length > 0) {
+      fields.push({
+        name: 'clarificationAnswer',
+        label: 'Pick the closest match',
+        type: 'select',
+        options: suggested.map((s) => ({ label: s, value: s })),
+        defaultValue: [suggested[0]],
+        multiSelect: false,
+      });
+      fields.push({
+        name: 'clarificationAnswerOther',
+        label: 'Or type a different answer (overrides the selection above)',
+        type: 'paragraph',
+        defaultValue: '',
+      });
+    } else {
+      // Model gave a question but no suggestions — fall back to free-text.
+      fields.push({
+        name: 'clarificationAnswer',
+        label: 'Your answer to the clarifying question',
+        type: 'paragraph',
+        defaultValue: '',
+      });
+    }
+
+    fields.push({
+      name: 'allowGuarded',
+      label: 'Allow this rule to ban/mute (otherwise removes only)',
+      type: 'boolean',
+      defaultValue: !!allowGuarded,
+      helpText: ALLOW_GUARDED_HELP,
+    });
+
     return c.json<UiResponse>({
       showForm: {
         name: 'ruleComposerForm',
@@ -399,27 +466,7 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
           title: 'Clarify the rule',
           description: compiled.question,
           acceptLabel: 'Re-compile',
-          fields: [
-            {
-              name: 'rule',
-              label: 'Original rule (do not edit)',
-              type: 'paragraph',
-              defaultValue: rule,
-              disabled: true,
-            },
-            {
-              name: 'clarificationAnswer',
-              label: 'Your answer to the clarifying question',
-              type: 'paragraph',
-              defaultValue: '',
-            },
-            {
-              name: 'allowGuarded',
-              label: 'Allow this rule to ban/mute (otherwise removes only)',
-              type: 'boolean',
-              defaultValue: !!allowGuarded,
-            },
-          ],
+          fields,
         },
       },
     });
@@ -546,14 +593,19 @@ app.post('/internal/form/compose-rule-submit', async (c) => {
   }
 
   // Honest user-facing toast — say what actually happened rather than promising
-  // a dashboard view that won't render if persistence failed.
-  const lines = [`Compiled rule "${validated.name}".`];
+  // a dashboard view that won't render if persistence failed. The 1-line
+  // summary (audit finding #6) makes the deterministic JSON contract visible
+  // before the moderator opens the dashboard, and the explicit "open menu →
+  // View rules + log" pointer replaces the previous "check Dashboard" hint
+  // (Devvit toasts have no buttons, so the path has to be in the text).
+  const summary = summarizeRule(validated);
+  const lines = [`Compiled rule "${validated.name}". ${summary}.`];
   if (persisted && dryRunQueued) {
-    lines.push('Dry-run started — check Dashboard in 30s.');
+    lines.push('Dry-run started — open the subreddit ⋯ menu → "vibe-mod: View rules + log" to see preview.');
   } else if (persisted) {
-    lines.push('Saved as draft (dry-run preview unavailable).');
+    lines.push('Saved as draft. Open the subreddit ⋯ menu → "vibe-mod: View rules + log".');
   } else {
-    lines.push('Plugin RPC unreachable — rule compiled but not persisted (reddit/devvit#258).');
+    lines.push('Rule compiled but not persisted — plugin RPC unreachable (reddit/devvit#258).');
   }
   return c.json<UiResponse>({
     showToast: {
@@ -1409,11 +1461,50 @@ async function callOpenAI(
   };
 }
 
-function isClarification(obj: unknown): obj is { needsClarification: true; question: string } {
-  return (
-    typeof obj === 'object' && obj !== null && (obj as { needsClarification?: boolean }).needsClarification === true
-  );
+function isClarification(
+  obj: unknown,
+): obj is { needsClarification: true; question: string; suggestedAnswers?: string[] } {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const o = obj as { needsClarification?: unknown; question?: unknown; suggestedAnswers?: unknown };
+  if (o.needsClarification !== true) return false;
+  if (typeof o.question !== 'string' || !o.question.trim()) return false;
+  return true;
 }
+
+// Helper: normalize a Devvit form value that may arrive as `string` or
+// `string[]` (SELECTION fields return arrays even for single-select — see
+// PR #39 SELECTION-array root cause). Returns the trimmed first non-empty
+// string, or ''.
+function unwrapFormString(raw: unknown): string {
+  if (typeof raw === 'string') return raw.trim();
+  if (Array.isArray(raw)) {
+    for (const v of raw) {
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  }
+  return '';
+}
+
+// Helper: 1-line summary of a compiled rule, suitable for a toast. Goes inside
+// a Devvit toast (~200 char budget) so it must stay short. Format:
+//   → onPostSubmit: modqueue (when /author<24h/)
+function summarizeRule(r: RuleType): string {
+  const triggers = r.on
+    .map((t) =>
+      t
+        .replace(/^on/, '')
+        .replace(/Submit$/, '')
+        .toLowerCase(),
+    )
+    .join('+');
+  const actions = [...new Set(r.then.map((a) => a.action))].join('+');
+  return `→ ${triggers}: ${actions}`;
+}
+
+// Help text shared by the compose form and the clarify modal so both modals
+// explain the ban/mute toggle the same way (audit finding #4).
+const ALLOW_GUARDED_HELP =
+  "vibe-mod only emits ban/mute when your rule explicitly says 'ban' or 'mute'. This checkbox lets the compile succeed when it does — leave it off for a removes-only rule.";
 
 export default app;
 
