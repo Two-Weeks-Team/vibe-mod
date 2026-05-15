@@ -51,8 +51,11 @@ export function registerTriggerRoutes(app: Hono): void {
       isVideo: post.isVideo,
       isSpoiler: post.isSpoiler,
       crosspostParentId: post.crosspostParentId,
+      flairText: post.linkFlair?.text ?? '',
+      flairCssClass: post.linkFlair?.cssClass ?? '',
       authorId: author.id,
       authorName: author.name,
+      authorFlairText: author.flair?.text ?? '',
       sub: subreddit
         ? { weeklyActiveUsers: subreddit.subscribersCount ?? 0, over18: subreddit.nsfw ?? false }
         : undefined,
@@ -92,6 +95,7 @@ export function registerTriggerRoutes(app: Hono): void {
       parentId: comment.parentId,
       authorId: author.id,
       authorName: author.name,
+      authorFlairText: author.flair?.text ?? '',
       sub: subreddit
         ? { weeklyActiveUsers: subreddit.subscribersCount ?? 0, over18: subreddit.nsfw ?? false }
         : undefined,
