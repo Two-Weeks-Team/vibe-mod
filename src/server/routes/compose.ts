@@ -84,7 +84,7 @@ export function registerComposeRoutes(app: Hono): void {
             },
             {
               name: 'allowGuarded',
-              label: 'Allow this rule to ban/mute (otherwise removes only)',
+              label: 'Allow this rule to ban/mute/approve (otherwise removes only)',
               type: 'boolean',
               defaultValue: false,
               helpText: ALLOW_GUARDED_HELP,
@@ -258,7 +258,7 @@ export function registerComposeRoutes(app: Hono): void {
 
       fields.push({
         name: 'allowGuarded',
-        label: 'Allow this rule to ban/mute (otherwise removes only)',
+        label: 'Allow this rule to ban/mute/approve (otherwise removes only)',
         type: 'boolean',
         defaultValue: !!allowGuarded,
         helpText: ALLOW_GUARDED_HELP,
@@ -304,7 +304,7 @@ export function registerComposeRoutes(app: Hono): void {
         if (hasGuarded) {
           return c.json<UiResponse>({
             showToast: {
-              text: 'This rule would ban/mute users. Re-submit with the "Allow ban/mute" checkbox if intended.',
+              text: 'This rule would ban/mute users or auto-approve content. Re-submit with the "Allow ban/mute/approve" checkbox if intended.',
               appearance: 'neutral',
             },
           });
@@ -514,7 +514,7 @@ export function registerComposeRoutes(app: Hono): void {
               },
               {
                 name: 'allowGuarded',
-                label: 'Allow this rule to ban/mute (otherwise removes only)',
+                label: 'Allow this rule to ban/mute/approve (otherwise removes only)',
                 type: 'boolean',
                 defaultValue: !!pending.allowGuarded,
                 helpText: ALLOW_GUARDED_HELP,

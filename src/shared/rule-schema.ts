@@ -18,7 +18,14 @@ import { z } from 'zod';
 //   "denied": LLM proposes → server rejects compile
 // ──────────────────────────────────────────────────────────────────────────────
 export const SAFE_ACTIONS = ['report', 'flair', 'lock', 'modqueue', 'remove'] as const;
-export const GUARDED_ACTIONS = ['ban', 'mute', 'permaban'] as const;
+// 'approve' is GUARDED (not SAFE) because its failure mode is asymmetric:
+// CRITICAL RULE #5 forces the LLM to require the explicit verb "remove" — but
+// natural language has many positive paraphrases ("trust regulars", "let them
+// through", "whitelist") that an LLM might compile to `approve`. A mistaken
+// approve waves spam/abusive content through (irreversible reputation cost),
+// whereas a mistaken remove rolls back. Mods must opt-in via the "Allow
+// guarded actions" checkbox before approve is even storable.
+export const GUARDED_ACTIONS = ['ban', 'mute', 'permaban', 'approve'] as const;
 export const ACTION_VERBS = [...SAFE_ACTIONS, ...GUARDED_ACTIONS] as const;
 export type ActionVerb = (typeof ACTION_VERBS)[number];
 
@@ -165,6 +172,13 @@ const Action = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('permaban'),
     params: z.object({ reason: z.string().max(200) }),
+  }),
+  z.object({
+    action: z.literal('approve'),
+    // Optional reason — mods may want an audit trail of *why* a rule
+    // auto-approved (e.g. "verified contributor flair"), but the API call
+    // itself takes no parameters.
+    params: z.object({ reason: z.string().max(200).optional() }),
   }),
 ]);
 
