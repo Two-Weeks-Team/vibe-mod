@@ -90,7 +90,7 @@ export type FactPath = (typeof FactPaths)[number];
 // property-based tests can share the same source of truth (previously the
 // evaluator hard-coded its own list of supported ops which could drift).
 // ──────────────────────────────────────────────────────────────────────────────
-export const PredicateOps = ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'contains', 'matches'] as const;
+export const PredicateOps = ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'notIn', 'contains', 'matches'] as const;
 export type PredicateOp = (typeof PredicateOps)[number];
 
 const LeafPredicate = z.object({
