@@ -43,9 +43,6 @@ import {
   todayKey,
   unwrapFormString,
 } from '../helpers/openai';
-// scheduler is exported by @devvit/web/server but TypeScript exports it from
-// the same module — silence the linter via a side-effect-free re-import.
-import { settings } from '@devvit/web/server';
 
 export function registerComposeRoutes(app: Hono): void {
   // Menu: open the composer form.
@@ -149,21 +146,15 @@ export function registerComposeRoutes(app: Hono): void {
       console.warn('[vibe-mod] submit: redis.get(todayCount) threw — skipping quota:', describeErr(err));
     }
 
-    let subOverrideKey = '';
-    try {
-      subOverrideKey = ((await settings.get('subredditOpenaiApiKey')) as string) ?? '';
-    } catch (err) {
-      console.warn(
-        '[vibe-mod] submit: settings.get(subredditOpenaiApiKey) threw — assuming no BYOK:',
-        describeErr(err),
-      );
-    }
-    const usingBYOK = !!subOverrideKey?.trim();
-
-    if (!usingBYOK && todayCount >= LIMITS.COMPILE_RATE_LIMIT_PER_DAY) {
+    // Single shared developer key — no per-sub override accepted. Devvit
+    // subreddit-scope settings are not encrypted (only `settings.global`
+    // with `isSecret: true` is); accepting a key in that scope would have
+    // exposed it plaintext to every mod of the sub. v0.0.51 removed the
+    // input entirely. Every sub shares the same daily compile quota.
+    if (todayCount >= LIMITS.COMPILE_RATE_LIMIT_PER_DAY) {
       return c.json<UiResponse>({
         showToast: {
-          text: `Compile quota reached (${LIMITS.COMPILE_RATE_LIMIT_PER_DAY}/day). Paste your own OpenAI key in settings to bypass.`,
+          text: `Compile quota reached (${LIMITS.COMPILE_RATE_LIMIT_PER_DAY}/day). The quota resets at midnight UTC.`,
           appearance: 'neutral',
         },
       });
@@ -192,8 +183,7 @@ export function registerComposeRoutes(app: Hono): void {
         userMsg =
           'OpenAI rejected the request (HTTP 401/403). The configured key is missing, invalid, or revoked. Run `npx devvit settings set openaiApiKey` with a fresh key.';
       } else if (msg === 'openai_429') {
-        userMsg =
-          'OpenAI rate-limited the request (HTTP 429). Wait a moment and try again, or attach a BYOK key in settings.';
+        userMsg = 'OpenAI rate-limited the request (HTTP 429). Wait a moment and try again.';
       } else if (msg.startsWith('openai_5')) {
         userMsg = 'OpenAI is having a server problem (HTTP 5xx). Try again in a minute.';
       } else {
@@ -322,8 +312,8 @@ export function registerComposeRoutes(app: Hono): void {
     // Audit finding #2 + Phase 2c demo-recording UX clean-up — confirmation
     // form before persistence. The previous shape carried 7 internal fields
     // through the form (rule / allowGuarded / serializedRule / tokensIn /
-    // tokensOut / llmModel / usingBYOK), which (a) bloated the modal so the
-    // mod had to scroll past a wall of disabled fields and (b) leaked
+    // tokensOut / llmModel / etc), which (a) bloated the modal so the mod
+    // had to scroll past a wall of disabled fields and (b) leaked
     // implementation detail. Now we stash the whole compile under a
     // 10-min Redis key (`composePending`) and only carry the short
     // pendingId across the form chain — see compose-confirm-submit.
@@ -337,7 +327,7 @@ export function registerComposeRoutes(app: Hono): void {
       // TTL-less pending key if expire failed after set succeeded.
       await redis.set(
         keys.composePending(subredditName, pendingId),
-        JSON.stringify({ validated, tokensIn, tokensOut, llmModel, usingBYOK, originalRule: rule, allowGuarded }),
+        JSON.stringify({ validated, tokensIn, tokensOut, llmModel, originalRule: rule, allowGuarded }),
         { expiration: new Date(Date.now() + 600_000) },
       );
     } catch (err) {
@@ -356,14 +346,12 @@ export function registerComposeRoutes(app: Hono): void {
     // OpenAI cost by repeatedly compiling and cancelling out of the
     // confirm form (CodeRabbit #5 PR #49). The token cost is real either
     // way, so the quota should reflect it either way.
-    if (!usingBYOK) {
-      try {
-        await redis.set(todayCounterKey, String(todayCount + 1), {
-          expiration: new Date(Date.now() + 86_400_000),
-        });
-      } catch (err) {
-        console.warn('[vibe-mod] submit: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
-      }
+    try {
+      await redis.set(todayCounterKey, String(todayCount + 1), {
+        expiration: new Date(Date.now() + 86_400_000),
+      });
+    } catch (err) {
+      console.warn('[vibe-mod] submit: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
     }
     const summaryHeader = [
       `Rule name: ${validated.name}`,
@@ -575,7 +563,6 @@ interface ComposePending {
   tokensIn: number;
   tokensOut: number;
   llmModel: string;
-  usingBYOK: boolean;
   originalRule: string;
   allowGuarded: boolean;
 }

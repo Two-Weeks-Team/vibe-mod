@@ -192,26 +192,18 @@ export async function callOpenAI(
     };
   }
 
-  // BYOK preference: sub-scope override key beats developer global key.
-  // settings.get can throw "undefined undefined: undefined" when Devvit's
-  // plugin RPC sidecar is unreachable. Treat *optional* BYOK failure as a
-  // warning only (per user-reviewed patch direction); fall through to the
-  // required global key. Skip the global-key lookup entirely when BYOK is
-  // present to save one RPC. The clarification answer is referenced below.
-  let subKey = '';
-  try {
-    subKey = ((await settings.get('subredditOpenaiApiKey')) as string) ?? '';
-  } catch (err) {
-    console.warn(
-      '[vibe-mod] callOpenAI: settings.get(subredditOpenaiApiKey) threw — continuing without BYOK:',
-      describeErr(err),
-    );
-  }
-
-  let apiKey = subKey.trim();
+  // Single developer-owned global key only. v0.0.51 removed the
+  // subreddit-scope BYOK input: Devvit subreddit settings are not encrypted
+  // (only `settings.global` with `isSecret: true` is — see
+  // node_modules/@devvit/shared-types/schemas/config-file.v1.d.ts and the
+  // Devvit docs note "Secrets are global settings marked with `isSecret:
+  // true`. They're encrypted and can only be set by developers via the
+  // CLI."). Accepting a key in subreddit scope would have exposed it
+  // plaintext to every mod of that sub.
+  let apiKey = '';
   let settingsRpcDown = false;
   let globalKeyLength = 0;
-  if (!apiKey) {
+  {
     try {
       const globalKey = ((await settings.get('openaiApiKey')) as string) ?? '';
       // Diagnostic per docs Q2 — typeof + length is safe to log; the *value*

@@ -122,7 +122,7 @@ describe('POST /internal/form/compose-rule-submit', () => {
     expect(fakeFetch).not.toHaveBeenCalled();
   });
 
-  it('blocks compile when the daily quota is exhausted and no BYOK key is set', async () => {
+  it('blocks compile when the daily quota is exhausted', async () => {
     asMod();
     const today = new Date().toISOString().slice(0, 10);
     await fakeRedis.set(`testsub:compile:count:${today}`, '50');
@@ -133,19 +133,24 @@ describe('POST /internal/form/compose-rule-submit', () => {
     expect(fakeFetch).not.toHaveBeenCalled();
   });
 
-  it('bypasses the quota when a subreddit BYOK key is configured', async () => {
+  it('blocks compile uniformly across subreddits — no per-sub key override accepted (v0.0.51)', async () => {
+    // Pre-v0.0.51 a mod could paste an OpenAI key into `subredditOpenaiApiKey`
+    // to bypass the per-sub quota. That setting is removed because Devvit
+    // subreddit-scope settings are not encrypted — any mod of the sub could
+    // read the key in plaintext. After removal, the quota is unconditional.
     asMod();
     const today = new Date().toISOString().slice(0, 10);
     await fakeRedis.set(`testsub:compile:count:${today}`, '50');
+    // Even with a (hypothetical) per-sub key value lying around in settings,
+    // the compose path no longer reads it.
     fakeSettings.get.mockImplementation(async (k: string) =>
-      k === 'subredditOpenaiApiKey' ? 'sk-byok' : k === 'openaiApiKey' ? 'sk-dev' : undefined,
+      k === 'subredditOpenaiApiKey' ? 'sk-stale-leftover-value' : k === 'openaiApiKey' ? 'sk-dev' : undefined,
     );
-    fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
-
-    const { saveBody } = await compileAndConfirm(VALID_COMPILED.sourceNL, false);
-    expect(saveBody.showToast.appearance).toBe('success');
-    // BYOK → counter not incremented
-    expect(await fakeRedis.get(`testsub:compile:count:${today}`)).toBe('50');
+    const body = await (
+      await call('/internal/form/compose-rule-submit', { rule: 'flag low karma', allowGuarded: false })
+    ).json();
+    expect(body.showToast.text).toContain('Compile quota reached');
+    expect(fakeFetch).not.toHaveBeenCalled();
   });
 
   it('returns a friendly toast (and does not crash) when the compiler is offline', async () => {
@@ -433,7 +438,6 @@ describe('POST /internal/form/compose-rule-submit', () => {
     // No more raw internal carriers in the modal.
     expect(fieldsByName.serializedRule).toBeUndefined();
     expect(fieldsByName.llmModel).toBeUndefined();
-    expect(fieldsByName.usingBYOK).toBeUndefined();
     // The pending entry should round-trip the model the test stubbed.
     const pendingJson = JSON.parse((await fakeRedis.get(`testsub:compose:pending:${fieldsByName.pendingId}`))!);
     expect(pendingJson.llmModel).toBe('gpt-5.4-nano');
@@ -542,46 +546,12 @@ describe('POST /internal/form/compose-rule-submit', () => {
     expect(await fakeRedis.get('testsub:rules:draft')).toBeUndefined();
   });
 
-  // Tests for user-direction patch set (BYOK / plugin-RPC / mock provider) —
-  // verifies the resilient-fallback behaviour added when Devvit's plugin RPC
-  // layer is unavailable in some runtimes.
+  // Tests for the resilient-fallback behaviour around Devvit's plugin RPC
+  // layer being unavailable in some runtimes.
 
-  it('continues with the global key when subredditOpenaiApiKey lookup throws (optional BYOK)', async () => {
+  it('surfaces the plugin-RPC-unavailable toast when the global key lookup throws', async () => {
     asMod();
     fakeSettings.get.mockImplementation(async (k: string) => {
-      if (k === 'subredditOpenaiApiKey') throw new Error('undefined undefined: undefined');
-      if (k === 'openaiApiKey') return 'sk-global';
-      return undefined;
-    });
-    fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
-
-    const { saveBody } = await compileAndConfirm(VALID_COMPILED.sourceNL, false);
-    expect(saveBody.showToast.appearance).toBe('success');
-    // confirm we DID call OpenAI (BYOK throw didn't fatal the flow)
-    expect(fakeFetch).toHaveBeenCalled();
-  });
-
-  it('skips the global-key lookup when a sub BYOK key is configured', async () => {
-    asMod();
-    let globalLookups = 0;
-    fakeSettings.get.mockImplementation(async (k: string) => {
-      if (k === 'subredditOpenaiApiKey') return 'sk-sub-byok';
-      if (k === 'openaiApiKey') {
-        globalLookups++;
-        return 'sk-should-not-be-called';
-      }
-      return undefined;
-    });
-    fakeFetch.mockResolvedValue(openaiResponse(VALID_COMPILED));
-
-    await call('/internal/form/compose-rule-submit', { rule: VALID_COMPILED.sourceNL, allowGuarded: false });
-    expect(globalLookups).toBe(0);
-  });
-
-  it('surfaces the plugin-RPC-unavailable toast when the global key lookup throws and no BYOK is set', async () => {
-    asMod();
-    fakeSettings.get.mockImplementation(async (k: string) => {
-      if (k === 'subredditOpenaiApiKey') return '';
       if (k === 'openaiApiKey') throw new Error('undefined undefined: undefined');
       return undefined;
     });
@@ -598,7 +568,6 @@ describe('POST /internal/form/compose-rule-submit', () => {
   it('returns the "no key configured" toast when settings work but the key is empty', async () => {
     asMod();
     fakeSettings.get.mockImplementation(async (k: string) => {
-      if (k === 'subredditOpenaiApiKey') return '';
       if (k === 'openaiApiKey') return '';
       return undefined;
     });

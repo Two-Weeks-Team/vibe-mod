@@ -179,9 +179,12 @@ same key; the deployed app reads only the Devvit secret, never `.env`.
 Notes:
 - The `openaiModel` setting (default `gpt-5.4-mini`) is a normal global setting; mods don't need to
   touch it.
-- `subredditOpenaiApiKey` is a **subreddit-scope** setting (BYOK to bypass the per-sub daily quota).
-  Devvit cannot encrypt subreddit-scope settings, so it's visible to that sub's mods — the help text
-  in `devvit.json` says so. Leave it blank to use the shared key.
+- There is **no per-subreddit OpenAI key input**. Devvit subreddit-scope settings are not encrypted
+  (only `settings.global` with `isSecret: true` is — see the Devvit docs: "Secrets are global settings
+  marked with `isSecret: true`. They're encrypted and can only be set by developers via the CLI."),
+  so accepting a key from each sub's mods would have exposed it plaintext to every mod of that sub.
+  v0.0.51 removed the input. Every install compiles through the shared developer key under the same
+  per-sub daily quota.
 
 ---
 
