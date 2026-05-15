@@ -286,13 +286,46 @@ describe('POST /internal/trigger/on-app-install', () => {
 });
 
 describe('POST /internal/scheduler/seed-on-install', () => {
-  it('seeds an empty active bundle and 5 starter draft rules', async () => {
+  it('seeds an empty active bundle and 6 starter draft rules', async () => {
     await call('/internal/scheduler/seed-on-install', {});
     const active = JSON.parse((await fakeRedis.get('testsub:rules:active'))!);
     const draft = JSON.parse((await fakeRedis.get('testsub:rules:draft'))!);
     expect(active.rules).toHaveLength(0);
     expect(draft.rules).toHaveLength(6);
     expect(draft.rules.every((r: { shadow: boolean }) => r.shadow === true)).toBe(true);
+  });
+
+  it('dispatches a welcome modmail on first install (FlairGuard parity onboarding push)', async () => {
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledTimes(1);
+    expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: expect.stringMatching(/welcome to vibe-mod/i),
+        bodyMarkdown: expect.stringContaining('onPostFlairUpdate'),
+        subredditId: 't5_testsub',
+      }),
+    );
+    expect(await fakeRedis.get('testsub:welcome:sent')).toMatch(/^\d+$/);
+  });
+
+  it('does NOT re-send the welcome modmail on subsequent seed-on-install runs', async () => {
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledTimes(1);
+    fakeReddit.modMail.createModNotification.mockClear();
+
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(fakeReddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it('does NOT set welcomeSent when modmail dispatch fails (retry-safe)', async () => {
+    fakeReddit.modMail.createModNotification.mockRejectedValueOnce(new Error('reddit API down'));
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(await fakeRedis.get('testsub:welcome:sent')).toBeUndefined();
+
+    // Retry succeeds → sentinel set
+    fakeReddit.modMail.createModNotification.mockResolvedValueOnce('conv_2');
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(await fakeRedis.get('testsub:welcome:sent')).toMatch(/^\d+$/);
   });
 
   it('does not clobber an existing draft on re-run', async () => {

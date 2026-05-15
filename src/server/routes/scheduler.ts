@@ -28,6 +28,32 @@ import { safeParseBundle } from '../helpers/rule-validation';
 
 void _scheduler; // imported for symmetry; route handlers don't enqueue jobs themselves
 
+// One-time welcome modmail dispatched on first install. Markdown so we can use
+// the same body via `bodyMarkdown` on `modMail.createModDiscussionConversation`.
+// Keep terse — Reddit modmail UI compresses long messages. No app secrets in
+// here (security audit: never echo `settings.get('openaiApiKey')` to modmail).
+const WELCOME_MODMAIL_BODY = `# 🌱 Welcome to vibe-mod
+
+You just installed **vibe-mod** on this subreddit — thank you!
+
+vibe-mod compiles **plain-English moderation rules** into a deterministic, auditable JSON pipeline. The LLM is **out of the loop** at runtime: every rule is evaluated by a typed, sandboxed engine (rate limits, circuit breaker, 30-day undo).
+
+## Three steps to start
+
+1. **Open the menu** → "vibe-mod: Compose rule" — write a rule like *"send posts from accounts < 24h old to mod queue"*.
+2. **Review the dry-run** — every new rule runs against the last 10 posts so you see what it *would* have done before it's live.
+3. **Promote when ready** — rules start in **shadow mode** for 24h. The dashboard's "Manage rules" menu flips shadow → live.
+
+## What you get out of the box
+
+- 6 starter draft rules (all shadow:true — safe to inspect)
+- A new \`onPostFlairUpdate\` trigger — try *"when the 'Spam' flair is applied, remove and lock"*
+- BYOK (bring your own OpenAI key) override in subreddit settings if you exceed the daily compile quota
+
+vibe-mod is open source: <https://developers.reddit.com/apps/vibe-mod>
+
+Reply to this thread with feedback — we read every message during the May 2026 Mod Tools hackathon judging period.`;
+
 // Dry-run preview (hard lock #3 — forced before Activate). When a rule is
 // compiled into the draft, this job runs immediately, replays the *last few
 // posts* through the draft rule (no actions taken — pure evaluation), and
@@ -45,8 +71,9 @@ export interface DryRunResult {
 }
 
 export function registerSchedulerRoutes(app: Hono): void {
-  // Seeds 5 starter draft rules + an empty active bundle on first install.
-  // Idempotent: if a draft / active already exists we don't clobber it.
+  // Seeds 6 starter draft rules + an empty active bundle on first install,
+  // and sends a one-time welcome modmail to the mod team (FlairGuard parity).
+  // Idempotent: each step guards on a Redis sentinel so re-runs are no-ops.
   app.post('/internal/scheduler/seed-on-install', async (c) => {
     await c.req.json<TaskRequest>().catch(() => null);
     try {
@@ -71,6 +98,35 @@ export function registerSchedulerRoutes(app: Hono): void {
     } catch (err) {
       console.error('[vibe-mod] seed-on-install failed (non-fatal — mod can still compose):', err);
     }
+
+    // Welcome modmail to the mod team (FlairGuard-parity onboarding push).
+    // Uses createModNotification (already battle-tested in vibe-mod's
+    // rate-limit-circuit-breaker) rather than createModDiscussionConversation
+    // because the former is the canonical "post a notification to the mods"
+    // API and is already production-verified — backend-architect agent's
+    // call. Best-effort: a failed modmail must NOT break the seed flow, and
+    // a partial install (rules seeded but modmail not sent) should be
+    // retryable on the next install/upgrade trigger — so we only set the
+    // welcomeSent sentinel AFTER a successful API call.
+    try {
+      const subredditName = getCurrentSubredditName();
+      const welcomeKey = keys.welcomeSent(subredditName);
+      const already = await redis.get(welcomeKey);
+      if (!already) {
+        const ref = getCurrentSubredditRef();
+        await reddit.modMail.createModNotification({
+          subject: 'Welcome to vibe-mod 🌱',
+          bodyMarkdown: WELCOME_MODMAIL_BODY,
+          subredditId: ref.id,
+        });
+        // Mark sent only after successful dispatch — failed sends are retried
+        // on subsequent seed-on-install invocations (one per install/upgrade).
+        await redis.set(welcomeKey, String(Date.now()));
+      }
+    } catch (err) {
+      console.warn('[vibe-mod] welcome modmail failed (non-fatal, will retry on next install):', err);
+    }
+
     return c.json<TaskResponse>({ status: 'ok' });
   });
 
