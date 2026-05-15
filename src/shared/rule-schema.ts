@@ -188,7 +188,18 @@ const Action = z.discriminatedUnion('action', [
 // preview, system-prompt.ts) can import the literal-typed union instead of
 // hard-coding 'onPostSubmit' | ... in their own signatures.
 // ──────────────────────────────────────────────────────────────────────────────
-export const RULE_TRIGGERS = ['onPostSubmit', 'onCommentSubmit', 'onPostReport', 'onCommentReport'] as const;
+export const RULE_TRIGGERS = [
+  'onPostSubmit',
+  'onCommentSubmit',
+  'onPostReport',
+  'onCommentReport',
+  // v0.0.50: onPostFlairUpdate — fires when a mod (or vibe-mod itself) changes
+  // a post's flair. Enables natural-language rules like "When the 'Spam' flair
+  // is applied, remove and lock the post". The dedupe key for this trigger
+  // includes the flair template id (see routes/triggers.ts) so flair-toggle
+  // loops terminate after one bounce.
+  'onPostFlairUpdate',
+] as const;
 export type RuleTriggerName = (typeof RULE_TRIGGERS)[number];
 const RuleTrigger = z.enum(RULE_TRIGGERS);
 
@@ -202,7 +213,7 @@ export const Rule = z
     id: z.string().regex(/^r_[a-z0-9_]{1,60}$/, 'id must match r_[a-z0-9_]{1,60}'),
     name: z.string().min(1).max(80),
     sourceNL: z.string().min(1).max(1000), // mod's original English
-    on: z.array(RuleTrigger).min(1).max(4),
+    on: z.array(RuleTrigger).min(1).max(RULE_TRIGGERS.length),
     when: PredicateTreeSchema,
     then: z.array(Action).min(1).max(5),
     // Rate-limit per author (to prevent rule from spamming a single user)

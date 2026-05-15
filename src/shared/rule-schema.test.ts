@@ -95,12 +95,15 @@ describe('Rule schema', () => {
     expect(() => Rule.parse({ ...baseRule, createdBy: 'u/spez' })).toThrow();
   });
 
-  it('requires at least one trigger and at most four', () => {
+  it('requires at least one trigger and at most RULE_TRIGGERS.length entries', () => {
     expect(() => Rule.parse({ ...baseRule, on: [] })).toThrow();
+    // Over-cap: 6 entries when RULE_TRIGGERS has 5 (post-v0.0.50). The
+    // duplicate at the end is deliberate so the array exceeds the cap
+    // regardless of how many enum members are added later.
     expect(() =>
       Rule.parse({
         ...baseRule,
-        on: ['onPostSubmit', 'onCommentSubmit', 'onPostReport', 'onCommentReport', 'onPostSubmit'],
+        on: ['onPostSubmit', 'onCommentSubmit', 'onPostReport', 'onCommentReport', 'onPostFlairUpdate', 'onPostSubmit'],
       }),
     ).toThrow();
   });
