@@ -5,9 +5,8 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
 import { evaluatePredicate } from './evaluator';
-import { FactPaths, type FactBag } from '../shared/rule-schema';
+import { FactPaths, PredicateOps, type FactBag } from '../shared/rule-schema';
 
-const OPS = ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'contains', 'matches'] as const;
 const scalarArb = fc.oneof(
   fc.string({ maxLength: 40 }),
   fc.double({ noNaN: true, noDefaultInfinity: true, min: -1e9, max: 1e9 }),
@@ -15,7 +14,7 @@ const scalarArb = fc.oneof(
 );
 const leafArb = fc.record({
   fact: fc.constantFrom(...FactPaths),
-  op: fc.constantFrom(...OPS),
+  op: fc.constantFrom(...PredicateOps),
   value: fc.oneof(scalarArb, fc.array(fc.oneof(fc.string({ maxLength: 10 }), fc.integer()), { maxLength: 5 })),
 });
 // arbitrary FactBag — give every closed key a value (the evaluator must tolerate type mismatches)
@@ -93,7 +92,8 @@ describe('evaluatePredicate — properties', () => {
         fc.integer({ min: -1_000_000, max: 1_000_000 }),
         (v, t) => {
           const facts = Object.fromEntries(FactPaths.map((k) => [k, k === numericFact ? v : 0])) as FactBag;
-          const P = (op: (typeof OPS)[number]) => evaluatePredicate({ fact: numericFact, op, value: t }, facts);
+          const P = (op: (typeof PredicateOps)[number]) =>
+            evaluatePredicate({ fact: numericFact, op, value: t }, facts);
           // gt ⇒ gte;  lt ⇒ lte;  not(gt && lt);  eq ⟺ (gte && lte);  eq ⟺ !neq
           expect(!P('gt') || P('gte')).toBe(true); // gt implies gte
           expect(!P('lt') || P('lte')).toBe(true); // lt implies lte

@@ -15,7 +15,14 @@ import { redis, scheduler } from '@devvit/web/server';
 import type { FormField, MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import { LIMITS } from '../../shared/limits';
 import { keys } from '../../shared/redis-keys';
-import { Rule, RuleBundle, checkTreeDepth, type RuleBundleType, type RuleType } from '../../shared/rule-schema';
+import {
+  GUARDED_ACTIONS,
+  Rule,
+  RuleBundle,
+  checkTreeDepth,
+  type RuleBundleType,
+  type RuleType,
+} from '../../shared/rule-schema';
 import { getCurrentSubredditName, getCurrentUserId } from '../devvit-helpers';
 import { isCallerModerator } from '../middleware/auth';
 import { describeErr } from '../middleware/diagnostics';
@@ -293,7 +300,7 @@ export function registerComposeRoutes(app: Hono): void {
       validatePredicateRegexes(validated.when as PredicateTreeShape);
 
       if (!allowGuarded) {
-        const hasGuarded = validated.then.some((a) => ['ban', 'mute', 'permaban'].includes(a.action));
+        const hasGuarded = validated.then.some((a) => (GUARDED_ACTIONS as readonly string[]).includes(a.action));
         if (hasGuarded) {
           return c.json<UiResponse>({
             showToast: {
