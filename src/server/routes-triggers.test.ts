@@ -144,7 +144,7 @@ describe('POST /internal/trigger/on-comment-submit', () => {
 });
 
 describe('POST /internal/trigger/on-post-flair-update', () => {
-  // The "Spam-flair → auto-remove" scenario is the FlairGuard-parity demo.
+  // The "Spam-flair → auto-remove" scenario showcases the new trigger.
   // vibe-mod expresses it as a natural-language rule listening on the new
   // onPostFlairUpdate trigger, with the post.flairText fact populated from
   // PostV2.linkFlair.text.
@@ -194,7 +194,7 @@ describe('POST /internal/trigger/on-post-flair-update', () => {
     expect(fakeReddit.getPostById).not.toHaveBeenCalled();
   });
 
-  it('fires the matching rule when the Spam flair is applied (FlairGuard-parity scenario)', async () => {
+  it('fires the matching rule when the Spam flair is applied (spam-flair removal scenario)', async () => {
     await fakeRedis.set('testsub:rules:active', JSON.stringify(spamFlairRule()));
     const post = { remove: () => {}, lock: () => {}, removed: false };
     fakeReddit.getPostById.mockResolvedValue(post);
@@ -295,7 +295,7 @@ describe('POST /internal/scheduler/seed-on-install', () => {
     expect(draft.rules.every((r: { shadow: boolean }) => r.shadow === true)).toBe(true);
   });
 
-  it('dispatches a welcome modmail on first install (FlairGuard parity onboarding push)', async () => {
+  it('dispatches a welcome modmail on first install (push-onboarding)', async () => {
     await call('/internal/scheduler/seed-on-install', {});
     expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledTimes(1);
     expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledWith(

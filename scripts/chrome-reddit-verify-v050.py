@@ -1,8 +1,8 @@
 """Production verification of v0.0.50 new capabilities on r/SocialSeeding.
 
-Covers the four features introduced by feature/flairguard-learnings-v050:
+Covers the four new features in v0.0.50 (the trigger-expansion release):
 
-  1. onPostFlairUpdate trigger end-to-end (FlairGuard-parity scenario).
+  1. onPostFlairUpdate trigger end-to-end (spam-flair handling scenario).
      Mod applies a flair named "Spam" to a test post → vibe-mod's starter
      rule r_spam_flair_modqueue matches → action: modqueue. Verified via:
      - Dashboard log shows a new audit row with action="modqueue" and
