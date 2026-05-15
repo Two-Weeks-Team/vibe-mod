@@ -55,6 +55,16 @@ export const keys = {
   onboardingDismissed: (sub: string) => `${sub}:onboarding:dismissed`,
 
   /**
+   * Timestamp string set after the install-time welcome modmail succeeds.
+   * Guards seed-on-install from re-sending on every retry. Never expires
+   * (Devvit preserves Redis state across app upgrade and clears it on
+   * uninstall — so a fresh re-install correctly starts the welcome flow
+   * over). Failed sends do NOT set this key, which is exactly the retry
+   * semantic we want.
+   */
+  welcomeSent: (sub: string) => `${sub}:welcome:sent`,
+
+  /**
    * Transient state for the 2-step compose flow (Phase 2c UX clean-up):
    * compose-rule-submit stores the validated rule + tokens + model under
    * this key, then composeConfirmForm only carries the short pendingId so
