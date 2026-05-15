@@ -50,18 +50,32 @@ real progress for the easy case, and the floor is now much higher than YAML Auto
 narrower than vibe-mod's, in three concrete ways:
 
 - **Facts we can rule on.** Automations expose user **flair** as the only author signal. vibe-mod's
-  closed fact-path enum gives a rule **eight** author signals — account age, post karma, comment karma,
-  per-sub karma, sub-join age, mod status, NSFW flag, premium status — plus six content signals
-  (length, all-caps ratio, non-ASCII ratio, URL count, NSFW/spoiler flags, crosspost flag) and three
-  report signals. "Brand new account posting a link" is one sentence in vibe-mod; it's not expressible
-  in Automations.
+  closed fact-path enum gives a rule **nine** author signals — account age, post karma, comment karma,
+  per-sub karma, sub-join age, mod status, verified-email, premium status, **sub-scoped author flair**
+  (v0.0.50) — plus content signals (length, word count, all-caps ratio, non-ASCII ratio, URL count,
+  domain, post-flair text + cssClass, NSFW/spoiler/video flags, crosspost flag), **time-of-day in UTC**
+  (v0.0.50: hourOfDay + dayOfWeek), and three report signals. "Brand new account posting a link after
+  midnight UTC" is one sentence in vibe-mod; it's not expressible in Automations.
 - **Actions we can take.** Automations offer Display / Report / Block. vibe-mod's whitelist includes
-  *report*, *flair*, *lock*, *modqueue*, *remove* (default-allowed) plus *ban*, *mute*, *permaban*
-  behind an explicit checkbox at compile time — eight actions vs three. Removal, lockdown, and ban
-  are the moves most mod tickets actually ask for.
+  *report*, *flair*, *lock*, *modqueue*, *remove* (default-allowed) plus *ban*, *mute*, *permaban*,
+  *approve* behind an explicit "Allow ban/mute/approve" checkbox at compile time — nine actions vs
+  three. *Approve* (v0.0.50) is gated specifically because the LLM has a wider ambiguous path to it
+  than to *remove* (positive paraphrases like "trust regulars" / "whitelist"), and a wrong approve is
+  asymmetric: spam waved through, no undo.
 - **Triggers.** Automations match on Posting and Commenting. vibe-mod also handles **report triggers**
-  (`onPostReport` / `onCommentReport`) so a rule like "auto-remove a comment after 3 reports from
-  distinct accounts" is one sentence.
+  (`onPostReport` / `onCommentReport`) and **flair-change triggers** (`onPostFlairUpdate`, v0.0.50) so
+  rules like "auto-remove a comment after 3 reports from distinct accounts" and "when the 'Spam' flair
+  is applied, remove and lock the thread" are each one sentence.
+
+### "Single-trigger flair handlers"
+
+Other hackathon entries in the *Mod Tools* track have shipped narrow, single-purpose flair handlers —
+useful for the one rule they're built for, but the moderator can't ask them anything else. vibe-mod is a
+general-purpose **rule compiler**: the same one-sentence interface that produces "Spam flair → remove +
+lock" also produces "low-karma + 3 links → modqueue", "after midnight UTC → mod review", and any
+combination of the 30+ facts and 9 actions inside the schema. Deterministic JSON intermediate
+representation means the rule is auditable, diffable, version-control-friendly, and shadow-testable
+before it goes live — a single-purpose handler is a black box by comparison.
 
 And on the safety story: Automations show a sandbox **preview** before activation; vibe-mod runs the
 real rule in **24-hour shadow mode** against real traffic (logs everything it would do, acts on
@@ -83,11 +97,21 @@ and I'd rather not learn AutoMod's YAML to express it."
   entries for what it *would* do, takes no action — then promotes itself automatically.
 - **30-day rollback.** Whenever vibe-mod acts, *"vibe-mod: Undo this action"* appears on that item's `⋯`
   menu for 30 days; one click restores it.
+- **Reactive flair triggers (v0.0.50).** Beyond user submissions, vibe-mod also listens for
+  `onPostFlairUpdate` — a rule like *"when the 'Spam' flair is applied, remove and lock"* is one
+  sentence. Dedupe keys compose (postId, flairTemplateId) so legitimate flair changes each fire while
+  flair-bounce loops terminate after one hop.
 - **Safety brakes.** Action whitelist (`report`/`flair`/`lock`/`modqueue`/`remove` are LLM-permitted;
-  `ban`/`mute` need an explicit checkbox), a per-hour action circuit breaker, a per-subreddit daily
-  compile quota, and a sub-level `dryRunOnly` master switch.
+  `ban`/`mute`/`approve` need an explicit checkbox — `approve` is gated because its failure mode is
+  asymmetric: a wrong approve waves spam through and is non-reversible), a per-hour action circuit
+  breaker, a per-subreddit daily compile quota, and a sub-level `dryRunOnly` master switch.
 - **Audit log.** Every shadow decision and every live action is recorded (30-day retention), visible
-  under *"vibe-mod: View rules + log"*. Five starter rules are seeded as shadow drafts on install.
+  under *"vibe-mod: View rules + log"*. Six starter rules are seeded as shadow drafts on install
+  (one of them showcases the new `onPostFlairUpdate` trigger).
+- **Welcome onboarding (v0.0.50).** On first install, vibe-mod sends a one-time markdown welcome
+  message to the mod team via the existing modmail notification API — three-step start guide + new
+  trigger highlights — guarded by a never-expires Redis sentinel so re-installs after uninstall
+  correctly re-onboard.
 
 **What it is not:** not an AI that reads your subreddit and decides things. The model runs exactly once
 per rule edit, on the moderator's sentence only. Runtime evaluation is pure, deterministic, offline.
@@ -194,7 +218,7 @@ per rule edit, on the moderator's sentence only. Runtime evaluation is pure, det
 · `redis` · `vite` · `vitest`
 
 **Try it out / links:**
-- Reddit App Directory listing: <https://developers.reddit.com/apps/vibe-mod>  *(URL is live; the listing flips from "Unlisted" to "Public" the moment `devvit publish --public` is approved.)*
+- Reddit App Directory listing: <https://developers.reddit.com/apps/vibe-mod>  **(PUBLIC — approved 2026-05-15, ~11h after publish; anyone moderating any subreddit can install with one click. v0.0.50 enters re-review queue alongside this Devpost submission and will auto-upgrade r/SocialSeeding on approval.)**
 - GitHub (public, MIT): https://github.com/Two-Weeks-Team/vibe-mod
 - Project plan / design doc: https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod-final-plan.html
 - Terms of Service: https://two-weeks-team.github.io/reddit-mod-tools-port-gallery/vibe-mod/tos.html
@@ -206,19 +230,24 @@ per rule edit, on the moderator's sentence only. Runtime evaluation is pure, det
 
 **Project Impact (which Reddit communities will use this & how):**
 > vibe-mod is built for the long tail of small-to-mid subreddits whose mod teams don't have an AutoMod
-> specialist — exactly the communities AutoMod's syntax leaves behind. We're running it first in
-> **r/SocialSeeding** (our own community, where vibe-mod handles "no spam / no low-effort / new-account"
-> rules), and `<<beta community 2 — USER TO FILL>>`, `<<beta community 3 — USER TO FILL>>` — places
-> where the recurring need is "catch low-effort / new-account / ALL-CAPS / link-spam posts": one English
-> sentence in vibe-mod, a fiddly regex block in AutoMod. Shadow mode + dry-run preview + 30-day undo
-> mean a mod can adopt it without betting their queue on a rule they wrote in 20 seconds.
+> specialist — exactly the communities AutoMod's syntax leaves behind. As of **2026-05-15** the app is
+> **publicly listed on the Reddit App Directory** (<https://developers.reddit.com/apps/vibe-mod>),
+> meaning *any mod of any subreddit can install with one click* — no allowlist, no whitelist. The
+> verified demo install runs on **r/SocialSeeding** (mod-team identity, Chrome-automated verify 16/16
+> PASS at the v0.0.48 baseline, full v0.0.50 verification scheduled post-approval — see
+> `scripts/chrome-reddit-verify-v050.py`).
+>
+> The communities where this lands first are the ones with the recurring "catch low-effort / new-account
+> / ALL-CAPS / link-spam / flair-triggered cleanup" patterns: one English sentence in vibe-mod, a fiddly
+> regex block in AutoMod. **Shadow mode + dry-run preview + 30-day undo + a one-time welcome modmail
+> with the 3-step start guide** mean a mod can adopt it without betting their queue on a rule they
+> wrote in 20 seconds.
 >
 > Phase 1.7b shipped a **per-rule control surface** (Manage rules menu) and a **compile-confirmation
-> form** that renders the deterministic JSON as English before saving — both directly aimed at the
-> "I want to write rules but I'm not a YAML person" mod we're building for.
->
-> *(Add the real beta subreddits before submitting; keep each < 200 subscribers per the hackathon rule
-> for test/demo communities.)*
+> form** that renders the deterministic JSON as English before saving. v0.0.50 (in re-review now) adds
+> the **onPostFlairUpdate trigger**, **author/post flair facts**, **UTC time-of-day facts**, the
+> **approve action behind an explicit guard**, and **welcome onboarding modmail** — all directly aimed
+> at the "I want to write rules but I'm not a YAML person" mod we're building for.
 
 **Hackathon / category:** Mod Tools and Migrated Apps Hackathon — Best New Mod Tool.
 
@@ -226,13 +255,15 @@ per rule edit, on the moderator's sentence only. Runtime evaluation is pure, det
 
 ## Pre-submission checklist
 
-- [ ] App published (`devvit publish --public`) and approved — or unlisted install link ready as fallback **(USER ACTION — D-9 = 2026-05-18)**
-- [x] App Directory URL stable — `https://developers.reddit.com/apps/vibe-mod` already live (filled in submission body and root `README.md`)
-- [ ] Demo video recorded (< 1 min, **no background music**, voiceover OK), uploaded to YouTube, captions (SRT) **(USER ACTION — record per `docs/demo-scenario.md` §3)**
+- [x] App **published AND approved PUBLIC** (`devvit publish --public` succeeded 2026-05-14, approval landed 2026-05-15 ~06:27 KST, ~11h ETA — anyone moderating any sub can install)
+- [x] App Directory URL stable + flagged PUBLIC — `https://developers.reddit.com/apps/vibe-mod` (filled in submission body and root `README.md`)
+- [ ] v0.0.50 re-publish after FlairGuard-learnings PR merge — enters review queue alongside Devpost submission **(USER ACTION — D-11 = 2026-05-16)**
+- [ ] Demo video recorded — **two-stage strategy**: (Stage 1) v0.0.48 base 60s now, (Stage 2) v0.0.50 epilogue 30s after approval. Per `docs/demo-scenario.md` §3. **(USER ACTION)**
 - [ ] 5 screenshots captured from the live app — auto-script `scripts/chrome-reddit-screenshots.py` (Phase 3, see this PR's siblings)
 - [x] `README.md` finalized (overview + installer instructions + changelog) — done in repo as of v0.0.41
 - [x] ToS + Privacy URLs reachable — both 200 on the GitHub Pages hosting
-- [ ] Project-Impact placeholders replaced with real beta communities — **USER decision (which 2-3 subreddits to list)**
+- [x] Project-Impact framing replaces "beta community 2/3" placeholders with the PUBLIC-listing message (anyone moderating any sub can install)
+- [ ] Chrome verify on v0.0.50 new features post-approval — `scripts/chrome-reddit-verify-v050.py` (per [[feedback-chrome-verify-mandate]])
 - [ ] Submitted on Devpost with ≥ 8h buffer before 2026-05-27 18:00 PT (D-day)
 
 ---
