@@ -83,8 +83,9 @@
 > Two-stage strategy per business-panel agent recommendation: shoot the 60s base
 > (§3 above) on v0.0.48 *now* to protect the demo asset from retake risk, then
 > append a 30-second epilogue once v0.0.50 lands on r/SocialSeeding showing the
-> new FlairGuard-parity capability. The two cuts are spliced into one Devpost
-> video; the epilogue can be skipped if v0.0.50 approval slips past D-day.
+> new flair-update trigger + install-time onboarding modmail. The two cuts are
+> spliced into one Devpost video; the epilogue can be skipped if v0.0.50
+> approval slips past D-day.
 
 | Sec | 화면 / 액션 | 자막 (영문) | 노출되는 v0.0.50 feature |
 |---:|---|---|---|

@@ -72,7 +72,7 @@ export interface DryRunResult {
 
 export function registerSchedulerRoutes(app: Hono): void {
   // Seeds 6 starter draft rules + an empty active bundle on first install,
-  // and sends a one-time welcome modmail to the mod team (FlairGuard parity).
+  // and sends a one-time welcome modmail to the mod team (push-onboarding).
   // Idempotent: each step guards on a Redis sentinel so re-runs are no-ops.
   app.post('/internal/scheduler/seed-on-install', async (c) => {
     await c.req.json<TaskRequest>().catch(() => null);
@@ -99,7 +99,7 @@ export function registerSchedulerRoutes(app: Hono): void {
       console.error('[vibe-mod] seed-on-install failed (non-fatal — mod can still compose):', err);
     }
 
-    // Welcome modmail to the mod team (FlairGuard-parity onboarding push).
+    // Install-time welcome modmail to the mod team (push-onboarding).
     // Uses createModNotification (already battle-tested in vibe-mod's
     // rate-limit-circuit-breaker) rather than createModDiscussionConversation
     // because the former is the canonical "post a notification to the mods"

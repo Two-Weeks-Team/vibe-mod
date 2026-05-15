@@ -67,15 +67,13 @@ narrower than vibe-mod's, in three concrete ways:
   rules like "auto-remove a comment after 3 reports from distinct accounts" and "when the 'Spam' flair
   is applied, remove and lock the thread" are each one sentence.
 
-### "Single-trigger flair handlers"
+### One language, many rules
 
-Other hackathon entries in the *Mod Tools* track have shipped narrow, single-purpose flair handlers —
-useful for the one rule they're built for, but the moderator can't ask them anything else. vibe-mod is a
-general-purpose **rule compiler**: the same one-sentence interface that produces "Spam flair → remove +
-lock" also produces "low-karma + 3 links → modqueue", "after midnight UTC → mod review", and any
-combination of the 30+ facts and 9 actions inside the schema. Deterministic JSON intermediate
-representation means the rule is auditable, diffable, version-control-friendly, and shadow-testable
-before it goes live — a single-purpose handler is a black box by comparison.
+vibe-mod is a general-purpose **rule compiler**: the same one-sentence interface that produces "Spam
+flair → remove + lock" also produces "low-karma + 3 links → modqueue", "after midnight UTC → mod
+review", and any combination of the 30+ facts and 9 actions inside the schema. Deterministic JSON
+intermediate representation means the rule is auditable, diffable, version-control-friendly, and
+shadow-testable before it goes live.
 
 And on the safety story: Automations show a sandbox **preview** before activation; vibe-mod runs the
 real rule in **24-hour shadow mode** against real traffic (logs everything it would do, acts on
@@ -257,7 +255,7 @@ per rule edit, on the moderator's sentence only. Runtime evaluation is pure, det
 
 - [x] App **published AND approved PUBLIC** (`devvit publish --public` succeeded 2026-05-14, approval landed 2026-05-15 ~06:27 KST, ~11h ETA — anyone moderating any sub can install)
 - [x] App Directory URL stable + flagged PUBLIC — `https://developers.reddit.com/apps/vibe-mod` (filled in submission body and root `README.md`)
-- [ ] v0.0.50 re-publish after FlairGuard-learnings PR merge — enters review queue alongside Devpost submission **(USER ACTION — D-11 = 2026-05-16)**
+- [ ] v0.0.50 re-publish after the trigger-expansion PR merge — enters review queue alongside Devpost submission **(USER ACTION — D-11 = 2026-05-16)**
 - [ ] Demo video recorded — **two-stage strategy**: (Stage 1) v0.0.48 base 60s now, (Stage 2) v0.0.50 epilogue 30s after approval. Per `docs/demo-scenario.md` §3. **(USER ACTION)**
 - [ ] 5 screenshots captured from the live app — auto-script `scripts/chrome-reddit-screenshots.py` (Phase 3, see this PR's siblings)
 - [x] `README.md` finalized (overview + installer instructions + changelog) — done in repo as of v0.0.41
