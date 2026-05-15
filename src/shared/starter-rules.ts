@@ -1,5 +1,5 @@
 // src/shared/starter-rules.ts
-// Five conservative starter rules seeded on install (onAppInstall trigger).
+// Six conservative starter rules seeded on install (onAppInstall trigger).
 // Design constraints:
 //   - SAFE actions only (report / flair / modqueue) — never remove, never guarded.
 //   - shadow: true on every rule — nothing acts for real until a mod promotes it.
@@ -79,6 +79,20 @@ const STARTER_RULE_SEEDS: readonly SeedRule[] = [
       value: ['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly', 'is.gd', 'buff.ly'],
     },
     then: [{ action: 'modqueue', params: { note: 'url-shortener link' } }],
+  },
+  // v0.0.50 — onPostFlairUpdate showcase. Demonstrates the new trigger
+  // without forcing the install sub to adopt a specific flair vocabulary:
+  // it watches for the literal string "Spam" in the applied flair text
+  // (case-insensitive contains, so "Spam (reported)" and "Reported as spam"
+  // both match). Shadow: true keeps it safe until the mod promotes.
+  {
+    id: 'r_spam_flair_modqueue',
+    name: 'Mod applies "Spam" flair → mod queue (demo of onPostFlairUpdate)',
+    sourceNL:
+      "When a moderator applies a flair whose text contains the word 'spam' to a post, send it to the mod queue for a second pair of eyes.",
+    on: ['onPostFlairUpdate'],
+    when: { fact: 'post.flairText', op: 'contains', value: 'spam' },
+    then: [{ action: 'modqueue', params: { note: 'spam-flair applied, double-check' } }],
   },
 ] as const;
 

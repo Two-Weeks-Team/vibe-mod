@@ -12,7 +12,7 @@ describe('seedStarterRules', () => {
   it('produces a schema-valid bundle of exactly 5 rules', () => {
     const bundle = seedStarterRules(1_700_000_000_000);
     expect(() => RuleBundle.parse(bundle)).not.toThrow();
-    expect(bundle.rules).toHaveLength(5);
+    expect(bundle.rules).toHaveLength(6);
     expect(bundle.rules.map((r) => r.id)).toEqual(STARTER_RULE_IDS);
   });
 

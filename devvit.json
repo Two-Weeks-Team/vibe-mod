@@ -105,7 +105,8 @@
     "onPostSubmit": "/internal/trigger/on-post-submit",
     "onCommentSubmit": "/internal/trigger/on-comment-submit",
     "onPostReport": "/internal/trigger/on-post-report",
-    "onCommentReport": "/internal/trigger/on-comment-report"
+    "onCommentReport": "/internal/trigger/on-comment-report",
+    "onPostFlairUpdate": "/internal/trigger/on-post-flair-update"
   },
   "scheduler": {
     "tasks": {

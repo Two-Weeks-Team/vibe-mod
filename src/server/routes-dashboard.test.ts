@@ -96,7 +96,8 @@ describe('POST /internal/menu/dashboard', () => {
     ).json();
     const text = dashTexts(body);
     expect(text).toContain('Active rules: 2');
-    expect(text).toContain('Draft rules: 5');
+    // Draft fixture uses full seedStarterRules() — count tracks STARTER_RULE_SEEDS.length.
+    expect(text).toContain('Draft rules: 6');
     expect(text).toContain('Recent actions: 2');
     expect(text).toContain('modqueue (applied)');
     expect(text).toContain('remove (shadow)');
