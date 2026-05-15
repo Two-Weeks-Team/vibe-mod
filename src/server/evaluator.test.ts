@@ -58,6 +58,17 @@ describe('evaluatePredicate — leaf operators', () => {
     expect(evaluatePredicate({ fact: 'content.urlDomain', op: 'in', value: 'discord.gg' }, f)).toBe(false); // value must be array
   });
 
+  it('notIn is the negation of in for any array value', () => {
+    // Member → in true → notIn false
+    expect(evaluatePredicate({ fact: 'content.urlDomain', op: 'notIn', value: ['discord.gg', 't.me'] }, f)).toBe(false);
+    // Non-member → in false → notIn true
+    expect(evaluatePredicate({ fact: 'content.urlDomain', op: 'notIn', value: ['t.me'] }, f)).toBe(true);
+    // Non-array value → returns false (defensive, matches 'in' behaviour)
+    expect(evaluatePredicate({ fact: 'content.urlDomain', op: 'notIn', value: 'discord.gg' }, f)).toBe(false);
+    // Empty array → notIn always true (nothing is a member of empty set)
+    expect(evaluatePredicate({ fact: 'content.urlDomain', op: 'notIn', value: [] }, f)).toBe(true);
+  });
+
   it('contains is case-insensitive substring on strings only', () => {
     expect(evaluatePredicate({ fact: 'content.title.contains', op: 'contains', value: 'cool' }, f)).toBe(true);
     expect(evaluatePredicate({ fact: 'content.title.contains', op: 'contains', value: 'COOL' }, f)).toBe(true);

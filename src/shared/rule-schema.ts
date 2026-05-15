@@ -18,7 +18,14 @@ import { z } from 'zod';
 //   "denied": LLM proposes → server rejects compile
 // ──────────────────────────────────────────────────────────────────────────────
 export const SAFE_ACTIONS = ['report', 'flair', 'lock', 'modqueue', 'remove'] as const;
-export const GUARDED_ACTIONS = ['ban', 'mute', 'permaban'] as const;
+// 'approve' is GUARDED (not SAFE) because its failure mode is asymmetric:
+// CRITICAL RULE #5 forces the LLM to require the explicit verb "remove" — but
+// natural language has many positive paraphrases ("trust regulars", "let them
+// through", "whitelist") that an LLM might compile to `approve`. A mistaken
+// approve waves spam/abusive content through (irreversible reputation cost),
+// whereas a mistaken remove rolls back. Mods must opt-in via the "Allow
+// guarded actions" checkbox before approve is even storable.
+export const GUARDED_ACTIONS = ['ban', 'mute', 'permaban', 'approve'] as const;
 export const ACTION_VERBS = [...SAFE_ACTIONS, ...GUARDED_ACTIONS] as const;
 export type ActionVerb = (typeof ACTION_VERBS)[number];
 
@@ -36,6 +43,11 @@ export const FactPaths = [
   'author.isModerator',
   'author.hasVerifiedEmail',
   'author.subJoinAgeHours', // estimated: time since first activity in this sub
+
+  // Author flair (sub-scoped — set by mods of this sub).
+  // Empty string when the author has no flair in this sub. Useful for
+  // "trusted contributor" patterns (e.g. flair text contains 'verified').
+  'author.flairText',
 
   // Content (post or comment body)
   'content.length',
@@ -56,6 +68,20 @@ export const FactPaths = [
   'content.url', // full URL (post link)
   'content.urlDomain', // hostname only
 
+  // Post flair (post-only — comments always have ''). Populated for onPostSubmit
+  // (the flair at submit time, often empty) AND onPostFlairUpdate (the newly
+  // applied flair). The text is the human-readable label; cssClass is the
+  // template's CSS class hook. Mods typically rule on text.
+  'post.flairText',
+  'post.flairCssClass',
+
+  // Trigger-time clock (UTC only — Devvit does not expose subreddit timezone).
+  // Computed at the moment the trigger fires; identical fact-bag will yield
+  // identical results, but DIFFERENT trigger times produce different bags
+  // (this is a real time-dependency, expected by mods who say "after midnight").
+  'time.hourOfDay', // 0..23 (UTC)
+  'time.dayOfWeek', // 0..6 (UTC, Sunday=0)
+
   // Subreddit context
   'sub.weeklyActiveUsers',
   'sub.over18',
@@ -71,7 +97,7 @@ export type FactPath = (typeof FactPaths)[number];
 // property-based tests can share the same source of truth (previously the
 // evaluator hard-coded its own list of supported ops which could drift).
 // ──────────────────────────────────────────────────────────────────────────────
-export const PredicateOps = ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'contains', 'matches'] as const;
+export const PredicateOps = ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'notIn', 'contains', 'matches'] as const;
 export type PredicateOp = (typeof PredicateOps)[number];
 
 const LeafPredicate = z.object({
@@ -147,6 +173,13 @@ const Action = z.discriminatedUnion('action', [
     action: z.literal('permaban'),
     params: z.object({ reason: z.string().max(200) }),
   }),
+  z.object({
+    action: z.literal('approve'),
+    // Optional reason — mods may want an audit trail of *why* a rule
+    // auto-approved (e.g. "verified contributor flair"), but the API call
+    // itself takes no parameters.
+    params: z.object({ reason: z.string().max(200).optional() }),
+  }),
 ]);
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -155,7 +188,18 @@ const Action = z.discriminatedUnion('action', [
 // preview, system-prompt.ts) can import the literal-typed union instead of
 // hard-coding 'onPostSubmit' | ... in their own signatures.
 // ──────────────────────────────────────────────────────────────────────────────
-export const RULE_TRIGGERS = ['onPostSubmit', 'onCommentSubmit', 'onPostReport', 'onCommentReport'] as const;
+export const RULE_TRIGGERS = [
+  'onPostSubmit',
+  'onCommentSubmit',
+  'onPostReport',
+  'onCommentReport',
+  // v0.0.50: onPostFlairUpdate — fires when a mod (or vibe-mod itself) changes
+  // a post's flair. Enables natural-language rules like "When the 'Spam' flair
+  // is applied, remove and lock the post". The dedupe key for this trigger
+  // includes the flair template id (see routes/triggers.ts) so flair-toggle
+  // loops terminate after one bounce.
+  'onPostFlairUpdate',
+] as const;
 export type RuleTriggerName = (typeof RULE_TRIGGERS)[number];
 const RuleTrigger = z.enum(RULE_TRIGGERS);
 
@@ -169,7 +213,7 @@ export const Rule = z
     id: z.string().regex(/^r_[a-z0-9_]{1,60}$/, 'id must match r_[a-z0-9_]{1,60}'),
     name: z.string().min(1).max(80),
     sourceNL: z.string().min(1).max(1000), // mod's original English
-    on: z.array(RuleTrigger).min(1).max(4),
+    on: z.array(RuleTrigger).min(1).max(RULE_TRIGGERS.length),
     when: PredicateTreeSchema,
     then: z.array(Action).min(1).max(5),
     // Rate-limit per author (to prevent rule from spamming a single user)

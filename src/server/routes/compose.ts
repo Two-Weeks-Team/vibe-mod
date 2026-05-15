@@ -15,7 +15,14 @@ import { redis, scheduler } from '@devvit/web/server';
 import type { FormField, MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import { LIMITS } from '../../shared/limits';
 import { keys } from '../../shared/redis-keys';
-import { Rule, RuleBundle, checkTreeDepth, type RuleBundleType, type RuleType } from '../../shared/rule-schema';
+import {
+  GUARDED_ACTIONS,
+  Rule,
+  RuleBundle,
+  checkTreeDepth,
+  type RuleBundleType,
+  type RuleType,
+} from '../../shared/rule-schema';
 import { getCurrentSubredditName, getCurrentUserId } from '../devvit-helpers';
 import { isCallerModerator } from '../middleware/auth';
 import { describeErr } from '../middleware/diagnostics';
@@ -77,7 +84,7 @@ export function registerComposeRoutes(app: Hono): void {
             },
             {
               name: 'allowGuarded',
-              label: 'Allow this rule to ban/mute (otherwise removes only)',
+              label: 'Allow this rule to ban/mute/approve (otherwise removes only)',
               type: 'boolean',
               defaultValue: false,
               helpText: ALLOW_GUARDED_HELP,
@@ -251,7 +258,7 @@ export function registerComposeRoutes(app: Hono): void {
 
       fields.push({
         name: 'allowGuarded',
-        label: 'Allow this rule to ban/mute (otherwise removes only)',
+        label: 'Allow this rule to ban/mute/approve (otherwise removes only)',
         type: 'boolean',
         defaultValue: !!allowGuarded,
         helpText: ALLOW_GUARDED_HELP,
@@ -293,11 +300,11 @@ export function registerComposeRoutes(app: Hono): void {
       validatePredicateRegexes(validated.when as PredicateTreeShape);
 
       if (!allowGuarded) {
-        const hasGuarded = validated.then.some((a) => ['ban', 'mute', 'permaban'].includes(a.action));
+        const hasGuarded = validated.then.some((a) => (GUARDED_ACTIONS as readonly string[]).includes(a.action));
         if (hasGuarded) {
           return c.json<UiResponse>({
             showToast: {
-              text: 'This rule would ban/mute users. Re-submit with the "Allow ban/mute" checkbox if intended.',
+              text: 'This rule would ban/mute users or auto-approve content. Re-submit with the "Allow ban/mute/approve" checkbox if intended.',
               appearance: 'neutral',
             },
           });
@@ -507,7 +514,7 @@ export function registerComposeRoutes(app: Hono): void {
               },
               {
                 name: 'allowGuarded',
-                label: 'Allow this rule to ban/mute (otherwise removes only)',
+                label: 'Allow this rule to ban/mute/approve (otherwise removes only)',
                 type: 'boolean',
                 defaultValue: !!pending.allowGuarded,
                 helpText: ALLOW_GUARDED_HELP,

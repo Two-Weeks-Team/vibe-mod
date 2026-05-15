@@ -43,6 +43,11 @@ export function evaluatePredicate(tree: PredicateTree, facts: FactBag): boolean 
       return typeof factValue === 'number' && typeof v === 'number' && factValue >= v;
     case 'in':
       return Array.isArray(v) && (v as unknown[]).includes(factValue);
+    case 'notIn':
+      // Negation of 'in'. Defensive: a non-array `v` is a schema bug
+      // (the predicate compiler would have rejected it), but we err on the
+      // side of "rule does not match" rather than throwing.
+      return Array.isArray(v) && !(v as unknown[]).includes(factValue);
     case 'contains':
       return (
         typeof factValue === 'string' && typeof v === 'string' && factValue.toLowerCase().includes(v.toLowerCase())

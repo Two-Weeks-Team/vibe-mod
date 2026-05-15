@@ -143,6 +143,132 @@ describe('POST /internal/trigger/on-comment-submit', () => {
   });
 });
 
+describe('POST /internal/trigger/on-post-flair-update', () => {
+  // The "Spam-flair → auto-remove" scenario is the FlairGuard-parity demo.
+  // vibe-mod expresses it as a natural-language rule listening on the new
+  // onPostFlairUpdate trigger, with the post.flairText fact populated from
+  // PostV2.linkFlair.text.
+  function spamFlairRule() {
+    const r: RuleType = Rule.parse({
+      id: 'r_spam_flair_remove',
+      name: 'Spam flair → remove + lock',
+      sourceNL: "When the 'Spam' flair is applied to a post, remove it and lock the thread.",
+      on: ['onPostFlairUpdate'],
+      when: { fact: 'post.flairText', op: 'eq', value: 'Spam' },
+      then: [
+        { action: 'remove', params: { spam: true } },
+        { action: 'lock', params: {} },
+      ],
+      createdAt: 0,
+      createdBy: 't2_seed',
+      enabled: true,
+      shadow: false,
+    });
+    return RuleBundle.parse({
+      schemaVersion: '1.0.0',
+      bundleVersion: 1,
+      compiledAt: 0,
+      llmModel: 'seed',
+      llmTokensIn: 0,
+      llmTokensOut: 0,
+      rules: [r],
+    });
+  }
+
+  const FLAIR_EVENT_SPAM = {
+    type: 'PostFlairUpdate',
+    post: {
+      id: 't3_pflair1',
+      title: 'sus link post',
+      selftext: '',
+      url: 'https://example.com/sus',
+      linkFlair: { text: 'Spam', cssClass: 'spam', templateId: 'tpl_spam' },
+    },
+    author: { id: 't2_bob', name: 'bob' },
+    subreddit: { subscribersCount: 100, nsfw: false },
+  };
+
+  it('is a no-op when the payload is missing post/author', async () => {
+    const res = await call('/internal/trigger/on-post-flair-update', { type: 'PostFlairUpdate' });
+    expect(await res.json()).toEqual({ status: 'ok' });
+    expect(fakeReddit.getPostById).not.toHaveBeenCalled();
+  });
+
+  it('fires the matching rule when the Spam flair is applied (FlairGuard-parity scenario)', async () => {
+    await fakeRedis.set('testsub:rules:active', JSON.stringify(spamFlairRule()));
+    const post = { remove: () => {}, lock: () => {}, removed: false };
+    fakeReddit.getPostById.mockResolvedValue(post);
+
+    await call('/internal/trigger/on-post-flair-update', FLAIR_EVENT_SPAM);
+
+    const audit = (await fakeRedis.zRange('testsub:audit', 0, -1)).map((m) => m.member);
+    expect(audit.length).toBe(2); // remove + lock
+  });
+
+  it('does NOT fire when the applied flair does not match the rule', async () => {
+    await fakeRedis.set('testsub:rules:active', JSON.stringify(spamFlairRule()));
+    fakeReddit.getPostById.mockResolvedValue({});
+
+    const nonSpamEvent = {
+      ...FLAIR_EVENT_SPAM,
+      post: { ...FLAIR_EVENT_SPAM.post, linkFlair: { text: 'Discussion', cssClass: 'd', templateId: 'tpl_disc' } },
+    };
+    await call('/internal/trigger/on-post-flair-update', nonSpamEvent);
+
+    expect((await fakeRedis.zRange('testsub:audit', 0, -1)).length).toBe(0);
+  });
+
+  it('dedupes on (postId, flairTemplateId) — same flair twice within window is suppressed', async () => {
+    await fakeRedis.set('testsub:rules:active', JSON.stringify(spamFlairRule()));
+    fakeReddit.getPostById.mockResolvedValue({ remove: () => {}, lock: () => {}, removed: false });
+
+    await call('/internal/trigger/on-post-flair-update', FLAIR_EVENT_SPAM);
+    await call('/internal/trigger/on-post-flair-update', FLAIR_EVENT_SPAM);
+
+    expect((await fakeRedis.zRange('testsub:audit', 0, -1)).length).toBe(2); // first call only (remove + lock)
+  });
+
+  it('distinct flair changes on the same post DO each fire (dedupe key includes templateId)', async () => {
+    // Build a rule that listens for ANY flair change and writes a single
+    // modqueue audit row — verifies that flipping between templateIds counts
+    // as distinct events even though postId is the same.
+    const anyFlairRule: RuleType = Rule.parse({
+      id: 'r_any_flair_log',
+      name: 'Any flair change → modqueue',
+      sourceNL: 'log every flair change to mod queue',
+      on: ['onPostFlairUpdate'],
+      when: { fact: 'content.length', op: 'gte', value: 0 }, // always-true sentinel
+      then: [{ action: 'modqueue', params: { note: 'flair-changed' } }],
+      createdAt: 0,
+      createdBy: 't2_seed',
+      enabled: true,
+      shadow: false,
+    });
+    const bundle = RuleBundle.parse({
+      schemaVersion: '1.0.0',
+      bundleVersion: 1,
+      compiledAt: 0,
+      llmModel: 'seed',
+      llmTokensIn: 0,
+      llmTokensOut: 0,
+      rules: [anyFlairRule],
+    });
+    await fakeRedis.set('testsub:rules:active', JSON.stringify(bundle));
+    fakeReddit.getPostById.mockResolvedValue({});
+
+    await call('/internal/trigger/on-post-flair-update', FLAIR_EVENT_SPAM);
+    await call('/internal/trigger/on-post-flair-update', {
+      ...FLAIR_EVENT_SPAM,
+      post: {
+        ...FLAIR_EVENT_SPAM.post,
+        linkFlair: { text: 'Confirmed-Spam', cssClass: 'c', templateId: 'tpl_confirmed' },
+      },
+    });
+
+    expect((await fakeRedis.zRange('testsub:audit', 0, -1)).length).toBe(2);
+  });
+});
+
 describe('POST /internal/trigger/on-app-install', () => {
   // The handler is bare-minimum — returns 200 immediately, NO body parse, NO
   // I/O, NO scheduler. Even a try/catch + scheduler.runJob() was enough to push
@@ -160,13 +286,46 @@ describe('POST /internal/trigger/on-app-install', () => {
 });
 
 describe('POST /internal/scheduler/seed-on-install', () => {
-  it('seeds an empty active bundle and 5 starter draft rules', async () => {
+  it('seeds an empty active bundle and 6 starter draft rules', async () => {
     await call('/internal/scheduler/seed-on-install', {});
     const active = JSON.parse((await fakeRedis.get('testsub:rules:active'))!);
     const draft = JSON.parse((await fakeRedis.get('testsub:rules:draft'))!);
     expect(active.rules).toHaveLength(0);
-    expect(draft.rules).toHaveLength(5);
+    expect(draft.rules).toHaveLength(6);
     expect(draft.rules.every((r: { shadow: boolean }) => r.shadow === true)).toBe(true);
+  });
+
+  it('dispatches a welcome modmail on first install (FlairGuard parity onboarding push)', async () => {
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledTimes(1);
+    expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: expect.stringMatching(/welcome to vibe-mod/i),
+        bodyMarkdown: expect.stringContaining('onPostFlairUpdate'),
+        subredditId: 't5_testsub',
+      }),
+    );
+    expect(await fakeRedis.get('testsub:welcome:sent')).toMatch(/^\d+$/);
+  });
+
+  it('does NOT re-send the welcome modmail on subsequent seed-on-install runs', async () => {
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(fakeReddit.modMail.createModNotification).toHaveBeenCalledTimes(1);
+    fakeReddit.modMail.createModNotification.mockClear();
+
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(fakeReddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it('does NOT set welcomeSent when modmail dispatch fails (retry-safe)', async () => {
+    fakeReddit.modMail.createModNotification.mockRejectedValueOnce(new Error('reddit API down'));
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(await fakeRedis.get('testsub:welcome:sent')).toBeUndefined();
+
+    // Retry succeeds → sentinel set
+    fakeReddit.modMail.createModNotification.mockResolvedValueOnce('conv_2');
+    await call('/internal/scheduler/seed-on-install', {});
+    expect(await fakeRedis.get('testsub:welcome:sent')).toMatch(/^\d+$/);
   });
 
   it('does not clobber an existing draft on re-run', async () => {

@@ -40,7 +40,10 @@ describe('action verb constants', () => {
 
   it('locks the v0.1 whitelist exactly', () => {
     expect([...SAFE_ACTIONS]).toEqual(['report', 'flair', 'lock', 'modqueue', 'remove']);
-    expect([...GUARDED_ACTIONS]).toEqual(['ban', 'mute', 'permaban']);
+    // v0.0.50: 'approve' joined GUARDED (not SAFE) so mods must opt-in before
+    // an LLM-emitted rule can auto-wave content through. See SAFE/GUARDED
+    // commentary in rule-schema.ts for the asymmetric-failure reasoning.
+    expect([...GUARDED_ACTIONS]).toEqual(['ban', 'mute', 'permaban', 'approve']);
   });
 });
 
@@ -92,12 +95,15 @@ describe('Rule schema', () => {
     expect(() => Rule.parse({ ...baseRule, createdBy: 'u/spez' })).toThrow();
   });
 
-  it('requires at least one trigger and at most four', () => {
+  it('requires at least one trigger and at most RULE_TRIGGERS.length entries', () => {
     expect(() => Rule.parse({ ...baseRule, on: [] })).toThrow();
+    // Over-cap: 6 entries when RULE_TRIGGERS has 5 (post-v0.0.50). The
+    // duplicate at the end is deliberate so the array exceeds the cap
+    // regardless of how many enum members are added later.
     expect(() =>
       Rule.parse({
         ...baseRule,
-        on: ['onPostSubmit', 'onCommentSubmit', 'onPostReport', 'onCommentReport', 'onPostSubmit'],
+        on: ['onPostSubmit', 'onCommentSubmit', 'onPostReport', 'onCommentReport', 'onPostFlairUpdate', 'onPostSubmit'],
       }),
     ).toThrow();
   });
