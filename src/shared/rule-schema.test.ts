@@ -40,7 +40,10 @@ describe('action verb constants', () => {
 
   it('locks the v0.1 whitelist exactly', () => {
     expect([...SAFE_ACTIONS]).toEqual(['report', 'flair', 'lock', 'modqueue', 'remove']);
-    expect([...GUARDED_ACTIONS]).toEqual(['ban', 'mute', 'permaban']);
+    // v0.0.50: 'approve' joined GUARDED (not SAFE) so mods must opt-in before
+    // an LLM-emitted rule can auto-wave content through. See SAFE/GUARDED
+    // commentary in rule-schema.ts for the asymmetric-failure reasoning.
+    expect([...GUARDED_ACTIONS]).toEqual(['ban', 'mute', 'permaban', 'approve']);
   });
 });
 

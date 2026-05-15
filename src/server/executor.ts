@@ -66,8 +66,9 @@ export async function executeActions(ctx: ExecutionContext): Promise<AuditEntry[
       return shortCircuit('rate_limited');
   }
 
-  // NB: GUARDED actions (ban/mute/permaban) are NOT skipped here — they only
-  // reach a stored rule if the mod ticked "Allow ban/mute" at compile time, and
+  // NB: GUARDED actions (ban/mute/permaban/approve) are NOT skipped here —
+  // they only reach a stored rule if the mod ticked "Allow ban/mute/approve"
+  // at compile time, and
   // they still go through the 24h shadow window and the circuit breaker like any
   // other action, with a 30-day rollback. The compile-time gate (see
   // /internal/form/compose-rule-submit) is the authorization point.
@@ -170,6 +171,16 @@ async function applyAction(act: ActionType, ctx: ExecutionContext): Promise<Reco
         reason: act.params.reason,
       });
       return { action: 'permaban' };
+    }
+    case 'approve': {
+      // GUARDED — only reached if mod explicitly allowed.
+      // Approve is INTENTIONALLY non-reversible at the rollback layer: if an
+      // automated approve was wrong, the mod must manually re-remove. Storing
+      // a rollback token here would invite "undo approve" UI patterns that
+      // hide the irreversibility (Reddit ToS: spam decisions are mod-attested).
+      const target = await getThing(ctx);
+      await target.approve();
+      return { reverseable: false };
     }
   }
 }
