@@ -37,6 +37,11 @@ export const FactPaths = [
   'author.hasVerifiedEmail',
   'author.subJoinAgeHours', // estimated: time since first activity in this sub
 
+  // Author flair (sub-scoped — set by mods of this sub).
+  // Empty string when the author has no flair in this sub. Useful for
+  // "trusted contributor" patterns (e.g. flair text contains 'verified').
+  'author.flairText',
+
   // Content (post or comment body)
   'content.length',
   'content.wordCount', // whitespace-delimited token count of the body
@@ -55,6 +60,20 @@ export const FactPaths = [
   'content.title.upperCaseRatio', // title's A–Z uppercase ratio — the "ALL CAPS TITLE" signal
   'content.url', // full URL (post link)
   'content.urlDomain', // hostname only
+
+  // Post flair (post-only — comments always have ''). Populated for onPostSubmit
+  // (the flair at submit time, often empty) AND onPostFlairUpdate (the newly
+  // applied flair). The text is the human-readable label; cssClass is the
+  // template's CSS class hook. Mods typically rule on text.
+  'post.flairText',
+  'post.flairCssClass',
+
+  // Trigger-time clock (UTC only — Devvit does not expose subreddit timezone).
+  // Computed at the moment the trigger fires; identical fact-bag will yield
+  // identical results, but DIFFERENT trigger times produce different bags
+  // (this is a real time-dependency, expected by mods who say "after midnight").
+  'time.hourOfDay', // 0..23 (UTC)
+  'time.dayOfWeek', // 0..6 (UTC, Sunday=0)
 
   // Subreddit context
   'sub.weeklyActiveUsers',

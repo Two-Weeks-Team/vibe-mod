@@ -18,9 +18,17 @@ interface PostInput {
   isVideo?: boolean;
   isSpoiler?: boolean;
   crosspostParentId?: string; // set when the post is a crosspost
+  // Post flair (PostV2.linkFlair). Both fields default to '' when the post
+  // is unflaired. Populated on every trigger that carries a post payload —
+  // onPostSubmit (flair at submit time) and onPostFlairUpdate (the newly
+  // applied flair).
+  flairText?: string;
+  flairCssClass?: string;
   sub?: { weeklyActiveUsers?: number; over18?: boolean };
   authorId: string;
   authorName: string;
+  // Author's flair *in this sub* (UserV2.flair). Empty string when unflaired.
+  authorFlairText?: string;
 }
 
 interface CommentInput {
@@ -29,7 +37,16 @@ interface CommentInput {
   parentId: string;
   authorId: string;
   authorName: string;
+  // Author's flair *in this sub* — same source as PostInput.authorFlairText.
+  authorFlairText?: string;
   sub?: { weeklyActiveUsers?: number; over18?: boolean };
+}
+
+// Trigger-time clock facts (UTC). Factored out so post + comment + future
+// triggers share one implementation, and so tests can inject a fixed Date
+// via dependency-free call sites (the evaluator's fact bag is the seam).
+function timeFacts(now: Date = new Date()): { hourOfDay: number; dayOfWeek: number } {
+  return { hourOfDay: now.getUTCHours(), dayOfWeek: now.getUTCDay() };
 }
 
 // Fraction of A–Z letters in `s` that are uppercase. 0 when `s` has no letters
@@ -98,6 +115,7 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
     urlDomain = '';
   }
   const imageCount = imageUrlCountIn(body) + (p.url && looksLikeImageUrl(p.url) ? 1 : 0);
+  const { hourOfDay, dayOfWeek } = timeFacts();
 
   return {
     'author.accountAgeHours': a.accountAgeHours,
@@ -108,6 +126,7 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
     'author.isModerator': a.isModerator,
     'author.hasVerifiedEmail': a.hasVerifiedEmail,
     'author.subJoinAgeHours': a.subJoinAgeHours,
+    'author.flairText': p.authorFlairText ?? '',
 
     'content.length': body.length,
     'content.wordCount': wordCountOf(body),
@@ -130,6 +149,12 @@ export async function buildPostFactBag(p: PostInput, reportsCount = 0): Promise<
     'content.url': p.url ?? '',
     'content.urlDomain': urlDomain,
 
+    'post.flairText': p.flairText ?? '',
+    'post.flairCssClass': p.flairCssClass ?? '',
+
+    'time.hourOfDay': hourOfDay,
+    'time.dayOfWeek': dayOfWeek,
+
     'sub.weeklyActiveUsers': p.sub?.weeklyActiveUsers ?? 0,
     'sub.over18': p.sub?.over18 ?? false,
 
@@ -142,6 +167,7 @@ export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Pr
   const a = await getAuthorFacts(c.authorId, c.authorName);
   const links = c.body.match(URL_RE) ?? [];
   const upperCaseRatio = upperCaseRatioOf(c.body);
+  const { hourOfDay, dayOfWeek } = timeFacts();
 
   return {
     'author.accountAgeHours': a.accountAgeHours,
@@ -152,6 +178,7 @@ export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Pr
     'author.isModerator': a.isModerator,
     'author.hasVerifiedEmail': a.hasVerifiedEmail,
     'author.subJoinAgeHours': a.subJoinAgeHours,
+    'author.flairText': c.authorFlairText ?? '',
 
     'content.length': c.body.length,
     'content.wordCount': wordCountOf(c.body),
@@ -172,6 +199,13 @@ export async function buildCommentFactBag(c: CommentInput, reportsCount = 0): Pr
     'content.title.upperCaseRatio': 0,
     'content.url': '',
     'content.urlDomain': '',
+
+    // Post-only fields — always empty for comments.
+    'post.flairText': '',
+    'post.flairCssClass': '',
+
+    'time.hourOfDay': hourOfDay,
+    'time.dayOfWeek': dayOfWeek,
 
     'sub.weeklyActiveUsers': c.sub?.weeklyActiveUsers ?? 0,
     'sub.over18': c.sub?.over18 ?? false,

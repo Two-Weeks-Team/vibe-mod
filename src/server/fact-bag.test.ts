@@ -118,6 +118,40 @@ describe('buildPostFactBag', () => {
     expect(bag['reports.count']).toBe(3);
     expect(bag['reports.distinctReporters']).toBe(3);
   });
+
+  it('passes through post flair text + cssClass (defaults to empty string)', async () => {
+    const flaired = await buildPostFactBag({
+      ...POST,
+      flairText: 'Spam',
+      flairCssClass: 'spam-flair',
+    });
+    expect(flaired['post.flairText']).toBe('Spam');
+    expect(flaired['post.flairCssClass']).toBe('spam-flair');
+
+    const unflaired = await buildPostFactBag(POST);
+    expect(unflaired['post.flairText']).toBe('');
+    expect(unflaired['post.flairCssClass']).toBe('');
+  });
+
+  it('passes through author flair text (defaults to empty string)', async () => {
+    const flaired = await buildPostFactBag({ ...POST, authorFlairText: 'Verified Contributor' });
+    expect(flaired['author.flairText']).toBe('Verified Contributor');
+
+    const unflaired = await buildPostFactBag(POST);
+    expect(unflaired['author.flairText']).toBe('');
+  });
+
+  it('emits trigger-time clock facts within valid ranges (UTC)', async () => {
+    const bag = await buildPostFactBag(POST);
+    expect(bag['time.hourOfDay']).toBeGreaterThanOrEqual(0);
+    expect(bag['time.hourOfDay']).toBeLessThanOrEqual(23);
+    expect(bag['time.dayOfWeek']).toBeGreaterThanOrEqual(0);
+    expect(bag['time.dayOfWeek']).toBeLessThanOrEqual(6);
+    // UTC-derived: values must match Date.now() at evaluation time
+    const now = new Date();
+    expect(bag['time.hourOfDay']).toBe(now.getUTCHours());
+    expect(bag['time.dayOfWeek']).toBe(now.getUTCDay());
+  });
 });
 
 describe('buildCommentFactBag', () => {
@@ -157,6 +191,24 @@ describe('buildCommentFactBag', () => {
     expect(bag['content.wordCount']).toBe(3); // "see", url, "좋아요"
     expect(bag['content.imageCount']).toBe(1); // i.imgur.com/x.png
     expect(bag['content.nonAsciiRatio']).toBeGreaterThan(0);
+  });
+
+  it('threads author.flairText, zeros post.flair* (post-only), and emits time facts', async () => {
+    const bag = await buildCommentFactBag({
+      id: 't1_c3',
+      body: 'hi',
+      parentId: 't3_p1',
+      authorId: 't2_a1',
+      authorName: 'alice',
+      authorFlairText: 'Regular',
+    });
+    expect(bag['author.flairText']).toBe('Regular');
+    // post-only fields are always empty for comments
+    expect(bag['post.flairText']).toBe('');
+    expect(bag['post.flairCssClass']).toBe('');
+    // time facts present and in range
+    expect(bag['time.hourOfDay']).toBeGreaterThanOrEqual(0);
+    expect(bag['time.hourOfDay']).toBeLessThanOrEqual(23);
   });
 });
 
