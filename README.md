@@ -99,9 +99,11 @@ Scheduler: audit retention (daily) · dry-run replay (one-shot) · shadow-promot
 5. If vibe-mod ever acts on something you disagree with, open that post/comment's `⋯` menu →
    *"vibe-mod: Undo this action"* (available for 30 days).
 
-App settings you can tune per subreddit: `dryRunOnly` (master kill-switch, default on), `maxActionsPerHour`
-(safety brake), `shadowDurationHours`, and an optional BYOK `subredditOpenaiApiKey` to bypass the shared
-daily compile quota.
+App settings you can tune per subreddit: `dryRunOnly` (master kill-switch, default on),
+`maxActionsPerHour` (safety brake), `shadowDurationHours`. There is no per-subreddit OpenAI key input
+— Devvit subreddit settings are not encrypted (only `settings.global` with `isSecret: true` is), so
+v0.0.51 removed the input and every install compiles through the shared developer key under the same
+per-sub daily quota.
 
 You never write YAML, you never write regex, and nothing vibe-mod does is permanent.
 

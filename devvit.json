@@ -14,7 +14,7 @@
         "type": "string",
         "label": "Developer OpenAI API Key (sk-…)",
         "isSecret": true,
-        "helpText": "Devvit constraint: secrets must be global. This key is shared across all subreddit installs of vibe-mod (per-install BYOK override available via subredditOpenaiApiKey below). Daily quota per sub is enforced to bound cost. Set it after the first upload: `npx devvit settings set openaiApiKey`."
+        "helpText": "Devvit secrets are global and encrypted: only the app developer can set or read this key. Every subreddit install of vibe-mod compiles through this single shared key, with a per-subreddit daily quota to bound cost. Set after the first upload: `npx devvit settings set openaiApiKey`."
       },
       "openaiModel": {
         "type": "select",
@@ -37,12 +37,6 @@
       }
     },
     "subreddit": {
-      "subredditOpenaiApiKey": {
-        "type": "string",
-        "label": "Override: this subreddit's own OpenAI key (optional)",
-        "defaultValue": "",
-        "helpText": "Leave blank to use vibe-mod's shared key (subject to daily quota). Paste your own sk-… key to bypass the quota and bill your own OpenAI account. Note: Devvit cannot encrypt subreddit-scope settings; this value will be visible to mods of this sub. Treat the key accordingly."
-      },
       "dryRunOnly": {
         "type": "boolean",
         "label": "Dry-run mode (rules log what they would do, but never act)",

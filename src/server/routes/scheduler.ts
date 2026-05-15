@@ -48,7 +48,7 @@ vibe-mod compiles **plain-English moderation rules** into a deterministic, audit
 
 - 6 starter draft rules (all shadow:true — safe to inspect)
 - A new \`onPostFlairUpdate\` trigger — try *"when the 'Spam' flair is applied, remove and lock"*
-- BYOK (bring your own OpenAI key) override in subreddit settings if you exceed the daily compile quota
+- A shared developer-owned OpenAI key with a per-subreddit daily compile quota (no per-sub key entry, because Devvit subreddit settings are not encrypted — see the v0.0.51 changelog)
 
 vibe-mod is open source: <https://developers.reddit.com/apps/vibe-mod>
 

@@ -163,10 +163,12 @@ per rule edit, on the moderator's sentence only. Runtime evaluation is pure, det
 - **Devvit's settings/secrets model.** Secrets must be global to the app, not per-subreddit, and
   `devvit settings set` only works after the first upload — which reorders the "setup" steps in a
   non-obvious way. We documented the correct order in `docs/devvit-setup-guide.md`.
-- **Doing the safety story right.** Action whitelist with an escape hatch for `ban`/`mute` only behind
-  an explicit checkbox; a per-hour circuit breaker; a per-sub daily compile quota with optional BYOK;
-  shadow-by-default with auto-promotion; 30-day rollback tokens with TTL. None of it is glamorous; all
-  of it is the point.
+- **Doing the safety story right.** Action whitelist with an escape hatch for `ban`/`mute`/`approve`
+  only behind an explicit checkbox; a per-hour circuit breaker; a per-sub daily compile quota under
+  a single developer-owned encrypted global key (v0.0.51 removed the per-sub key input — Devvit
+  subreddit settings aren't encrypted, so accepting a key there would have exposed it plaintext to
+  every mod of that sub); shadow-by-default with auto-promotion; 30-day rollback tokens with TTL.
+  None of it is glamorous; all of it is the point.
 
 ## 5. Accomplishments we're proud of
 
