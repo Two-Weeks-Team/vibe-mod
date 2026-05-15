@@ -107,6 +107,42 @@ describe('executeActions — guarded verbs', () => {
     expect(fakeReddit.banUser).toHaveBeenCalledWith(expect.objectContaining({ username: 'spammer', reason: 'spam' }));
     expect(await fakeRedis.get(`testsub:rollback:${audits[0].actionId}`)).toBeTruthy();
   });
+
+  it('approve action (GUARDED) — calls reddit approve and writes audit; rollbackAction refuses', async () => {
+    // approve is GUARDED for the asymmetric-failure reason in rule-schema.ts.
+    // The executor writes a rollback row for audit consistency, but
+    // rollbackAction() explicitly refuses to undo approves: if an automated
+    // approve was wrong, the mod must manually re-remove (Reddit ToS:
+    // spam-decisions are mod-attested, so a silent "undo approve" would
+    // hide that attestation).
+    const post = { approve: vi.fn() };
+    fakeReddit.getPostById.mockResolvedValue(post);
+    const r = rule({ then: [{ action: 'approve', params: { reason: 'verified-flair' } }] });
+
+    const audits = await executeActions(ctx({ rule: r }));
+
+    expect(audits[0].outcome).toBe('applied');
+    expect(post.approve).toHaveBeenCalledTimes(1);
+    const hash = await fakeRedis.hGetAll(`testsub:audit:${audits[0].actionId}`);
+    expect(hash.action).toBe('approve');
+    expect(hash.outcome).toBe('applied');
+
+    // Rollback explicitly refuses approve — error path, no Reddit call.
+    const rb = await rollbackAction('testsub', audits[0].actionId);
+    expect(rb.ok).toBe(false);
+    expect(rb.reason).toMatch(/not reversible/i);
+  });
+
+  it('approve action in shadow mode logs without calling reddit', async () => {
+    const post = { approve: vi.fn() };
+    fakeReddit.getPostById.mockResolvedValue(post);
+    const r = rule({ then: [{ action: 'approve', params: {} }] });
+
+    const audits = await executeActions(ctx({ rule: r, isShadowMode: true }));
+
+    expect(audits[0].outcome).toBe('shadow');
+    expect(post.approve).not.toHaveBeenCalled();
+  });
 });
 
 describe('executeActions — applied path + audit/rollback', () => {

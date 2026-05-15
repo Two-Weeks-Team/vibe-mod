@@ -78,6 +78,42 @@
 - **Turn counter** — 0:11-0:18 sec (7초). "(Round 2 of 3)" 자막 자연스럽게.
 - **Token cost** — 0:18-0:28 sec + 0:34-0:41 sec. 두 번 노출.
 
+## §3a v0.0.50 epilogue (Stage 2, 30s — record after v0.0.50 approval lands)
+
+> Two-stage strategy per business-panel agent recommendation: shoot the 60s base
+> (§3 above) on v0.0.48 *now* to protect the demo asset from retake risk, then
+> append a 30-second epilogue once v0.0.50 lands on r/SocialSeeding showing the
+> new FlairGuard-parity capability. The two cuts are spliced into one Devpost
+> video; the epilogue can be skipped if v0.0.50 approval slips past D-day.
+
+| Sec | 화면 / 액션 | 자막 (영문) | 노출되는 v0.0.50 feature |
+|---:|---|---|---|
+| 0:60–0:62 | r/SocialSeeding 페이지 → ⋯ overflow → "vibe-mod: Compose rule". | *And one more thing — vibe-mod reacts to mod actions too.* | (transition) |
+| 0:62–0:70 | textarea에 입력: **`When the 'Spam' flair is applied to a post, remove it and lock the thread.`**. allowGuarded=OFF. "Compile + Preview". | *Plain English. Same compiler. New trigger.* | onPostFlairUpdate trigger |
+| 0:70–0:74 | Confirm form: compiledSummary shows *"on: onPostFlairUpdate. when: post.flairText eq 'Spam'. then: remove + lock."*. "Save + Activate". | *Compiles to a flair-update rule. (Wow #5)* | post.flairText fact + flair trigger |
+| 0:74–0:82 | 화면 전환: 같은 페이지에서 테스트 post 1개에 mod이 직접 **"Spam"** flair 적용. ~1초 후 post가 자동 removed + locked 표시. | *Mod applies Spam flair → vibe-mod removes & locks instantly.* | end-to-end trigger demo |
+| 0:82–0:88 | mod inbox 열기 → **"Welcome to vibe-mod"** modmail 표시 (one-time install message). | *And every new install gets a markdown welcome to the mod team.* | welcome modmail |
+| 0:88–0:90 | Outro card: **vibe-mod v0.0.50** + *"Triggers. Facts. Actions. All in one English sentence."* | — | summary |
+
+**총 90초** (base 60s + epilogue 30s). 와우 5개로 확장.
+
+### Stage 2 setup
+1. v0.0.50 has been approved by Reddit and r/SocialSeeding auto-upgraded (check
+   `developers.reddit.com/apps/vibe-mod` for version + last-modified).
+2. r/SocialSeeding has a flair template named exactly **"Spam"** (create via
+   Reddit's flair management UI, color = red, mod-only).
+3. The starter rule `r_spam_flair_modqueue` is already shadow-mode (default).
+   For the demo, manually promote it via Manage rules → Activate. *(Or write a
+   fresh rule per the script above, which the video makes more compelling.)*
+4. A throwaway test post on r/SocialSeeding from a sock-puppet account, ready
+   for the flair-apply moment. The post itself doesn't matter — only that mod
+   can apply the Spam flair to it.
+
+### Stage 2 verification (per [[feedback-chrome-verify-mandate]])
+Before recording, run `scripts/chrome-reddit-verify-v050.py` headed (HEADLESS=0)
+and confirm the four steps PASS in `playwright/.auth/verify-v050-result.json`:
+flair-trigger, approve-guarded, time-facts, welcome-modmail.
+
 ## §4 자동 video 백업 (Phase 4 산출물)
 
 `scripts/chrome-reddit-demo.py` (chrome-reddit-v3.py 변형):

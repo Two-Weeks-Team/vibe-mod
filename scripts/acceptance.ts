@@ -221,10 +221,13 @@ const gate4: Gate = {
   title: 'Day 4 — Hardening: starter rules, unit suite, ToS/Privacy',
   checks: [
     {
-      name: 'seedStarterRules() produces a schema-valid bundle of 5 SAFE-action rules',
+      name: 'seedStarterRules() produces a schema-valid bundle of SAFE-action rules (count tracks STARTER_RULE_IDS.length)',
       run: () => {
         const bundle = seedStarterRules(1_700_000_000_000); // throws if invalid
-        assert(bundle.rules.length === 5, `expected 5 starter rules, got ${bundle.rules.length}`);
+        assert(
+          bundle.rules.length === STARTER_RULE_IDS.length,
+          `expected ${STARTER_RULE_IDS.length} starter rules, got ${bundle.rules.length}`,
+        );
         assert(
           JSON.stringify(bundle.rules.map((r) => r.id)) === JSON.stringify(STARTER_RULE_IDS),
           'starter rule ids drifted',

@@ -13,6 +13,7 @@ import type {
   OnCommentSubmitRequest,
   OnPostReportRequest,
   OnCommentReportRequest,
+  OnPostFlairUpdateRequest,
   OnAppUpgradeRequest,
   TriggerResponse,
 } from '@devvit/web/shared';
@@ -30,6 +31,22 @@ import { safeParseBundle } from '../helpers/rule-validation';
 async function isDuplicateTrigger(trigger: string, thingId: string): Promise<boolean> {
   const subName = getCurrentSubredditName();
   const dedupeKey = keys.seen(subName, trigger, thingId);
+  return !(await acquireOnce(dedupeKey, LIMITS.TRIGGER_DEDUPE_SECONDS));
+}
+
+// onPostFlairUpdate dedupes on (postId + flairTemplateId) rather than just
+// postId. Why: a mod can legitimately change flair A → B → A within the 10-
+// minute dedupe window, and we want each *distinct* flair change to fire its
+// own rule evaluation. Composing the templateId (or 'unflaired' when the post
+// is cleared of flair) into the dedupe key gives each flair-state its own
+// dedupe slot — but the same (post, flair) tuple within 10 minutes is still
+// suppressed, which is exactly what terminates flair-bounce loops introduced
+// by accidental "every flair → another flair" rules. (security-engineer
+// recommendation.)
+async function isDuplicateFlairUpdate(postId: string, flairTemplateId: string): Promise<boolean> {
+  const subName = getCurrentSubredditName();
+  const composite = `${postId}:${flairTemplateId || 'unflaired'}`;
+  const dedupeKey = keys.seen(subName, 'postFlairUpdate', composite);
   return !(await acquireOnce(dedupeKey, LIMITS.TRIGGER_DEDUPE_SECONDS));
 }
 
@@ -51,8 +68,11 @@ export function registerTriggerRoutes(app: Hono): void {
       isVideo: post.isVideo,
       isSpoiler: post.isSpoiler,
       crosspostParentId: post.crosspostParentId,
+      flairText: post.linkFlair?.text ?? '',
+      flairCssClass: post.linkFlair?.cssClass ?? '',
       authorId: author.id,
       authorName: author.name,
+      authorFlairText: author.flair?.text ?? '',
       sub: subreddit
         ? { weeklyActiveUsers: subreddit.subscribersCount ?? 0, over18: subreddit.nsfw ?? false }
         : undefined,
@@ -92,6 +112,7 @@ export function registerTriggerRoutes(app: Hono): void {
       parentId: comment.parentId,
       authorId: author.id,
       authorName: author.name,
+      authorFlairText: author.flair?.text ?? '',
       sub: subreddit
         ? { weeklyActiveUsers: subreddit.subscribersCount ?? 0, over18: subreddit.nsfw ?? false }
         : undefined,
@@ -134,6 +155,57 @@ export function registerTriggerRoutes(app: Hono): void {
 
   app.post('/internal/trigger/on-app-upgrade', async (c) => {
     await c.req.json<OnAppUpgradeRequest>();
+    return c.json<TriggerResponse>({ status: 'ok' });
+  });
+
+  app.post('/internal/trigger/on-post-flair-update', async (c) => {
+    const { post, author, subreddit } = await c.req.json<OnPostFlairUpdateRequest>();
+    if (!post || !author) return c.json<TriggerResponse>({ status: 'ok' });
+
+    // Dedupe on (postId, flairTemplateId) so distinct flair changes each fire
+    // once but flair-bounce loops terminate after the second hop. See
+    // isDuplicateFlairUpdate comment above for the security rationale.
+    const flairTemplateId = post.linkFlair?.templateId ?? '';
+    if (await isDuplicateFlairUpdate(post.id, flairTemplateId)) {
+      return c.json<TriggerResponse>({ status: 'ok' });
+    }
+
+    const facts = await buildPostFactBag({
+      id: post.id,
+      title: post.title,
+      body: post.selftext ?? '',
+      url: post.url,
+      nsfw: post.nsfw,
+      isVideo: post.isVideo,
+      isSpoiler: post.isSpoiler,
+      crosspostParentId: post.crosspostParentId,
+      flairText: post.linkFlair?.text ?? '',
+      flairCssClass: post.linkFlair?.cssClass ?? '',
+      authorId: author.id,
+      authorName: author.name,
+      authorFlairText: author.flair?.text ?? '',
+      sub: subreddit
+        ? { weeklyActiveUsers: subreddit.subscribersCount ?? 0, over18: subreddit.nsfw ?? false }
+        : undefined,
+    });
+
+    const subredditName = getCurrentSubredditName();
+    const bundle = safeParseBundle(await redis.get(keys.rulesActive(subredditName)), 'on-post-flair-update');
+    if (!bundle) return c.json<TriggerResponse>({ status: 'ok' });
+    const matching = selectMatchingRules(bundle.rules, 'onPostFlairUpdate', facts);
+
+    for (const rule of matching) {
+      await executeActions({
+        rule,
+        thingId: post.id,
+        thingType: 'post',
+        authorName: author.name,
+        authorId: author.id,
+        isDryRun: false,
+        isShadowMode: rule.shadow,
+      });
+    }
+
     return c.json<TriggerResponse>({ status: 'ok' });
   });
 

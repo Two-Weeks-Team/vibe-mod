@@ -36,3 +36,4 @@ docs/*.html
 # These contain Reddit session cookies + page captures with potential PII.
 .venv-chrome-auth/
 playwright/
+scripts/__pycache__/
