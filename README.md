@@ -16,6 +16,34 @@ _Screenshots (compose form · dry-run preview · audit log) are added once the a
 
 ---
 
+## 🏁 Judge path (first 60 seconds)
+
+**Canonical links**
+
+- **App Directory listing (install here):** <https://developers.reddit.com/apps/vibe-mod> — listed build **v0.0.49**, approved & PUBLIC.
+- **Source code:** <https://github.com/Two-Weeks-Team/vibe-mod>
+- **Build/version & CI evidence:** [`docs/release-baseline.md`](./docs/release-baseline.md) · **impact:** [`docs/impact.md`](./docs/impact.md) · **conflict handling:** [`docs/conflict-handling.md`](./docs/conflict-handling.md)
+
+**Install & permissions (what you grant)**
+
+Install from the App Directory onto a subreddit you moderate. vibe-mod requests exactly: `reddit` (scope `moderator`, to take mod actions), `redis` (store rules/audit/rollback tokens), and `http` to **one** domain `api.openai.com` (used **only** when a mod clicks "Compile" — never per post/comment, and Reddit content is never sent). No always-on server; it runs Devvit-native.
+
+**The 60-second flow**
+
+1. **Compose** — subreddit `⋯` → *"vibe-mod: Compose rule"* → type a rule in plain English → **Compile + Preview**. (OpenAI returns JSON → validated against a strict Zod schema **and** an action whitelist before storage.)
+2. **Dry-run preview** — see which of your recent posts the draft *would* have matched. No action taken.
+3. **Activate → 24h shadow** — *"vibe-mod: Manage rules"* → Activate. The rule logs "would do X" for 24h and **acts on nothing**, then auto-promotes. Inspect those decisions + the audit log under *"vibe-mod: View rules + log"* (which also shows a ⚠ **potential rule-conflict** preview).
+4. **Rollback** — if a live action is ever wrong, that item's `⋯` menu → *"vibe-mod: Undo this action"*, available for **30 days**.
+
+**Current limitations (so nothing is overclaimed)**
+
+- The **listed build is v0.0.49**; repo HEAD (v0.0.51) adds security hardening + the conflict preview and is **not** guaranteed live in the listing — see the baseline section directly below.
+- Conflict handling is a **read-only preview**, not blocking arbitration; predicate-overlap analysis is future work ([`docs/conflict-handling.md`](./docs/conflict-handling.md)).
+- Moderator-impact numbers are **architectural facts vs. to-measure metrics** — pilot data is not yet collected ([`docs/impact.md`](./docs/impact.md)).
+- v0.1 is **English-only**; the Devvit runtime (routing/RPC) is verified via `devvit playtest`, not in CI.
+
+---
+
 ## 📦 Submission baseline & build versions (read this first)
 
 vibe-mod has **two builds that judges may encounter**, and they are deliberately not the same. This section is the canonical statement of which is which.
