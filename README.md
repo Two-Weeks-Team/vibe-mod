@@ -59,6 +59,28 @@ Split honestly into **architectural facts** (true by construction, verifiable in
 
 ---
 
+## 🆚 How vibe-mod differs from AutoModerator / PRAW / generic "AI moderation"
+
+vibe-mod is **not** an AutoModerator natural-language wrapper, and **not** an LLM that reads your subreddit and decides things. The distinction is architectural, not cosmetic:
+
+| | **vibe-mod** | **AutoModerator** | **PRAW bot** | **Generic "AI moderation" app** |
+|---|---|---|---|---|
+| **Where the LLM runs** | **Edit-time only** — translates one English sentence → JSON, once per rule | none (you hand-write YAML+regex) | none (you hand-write Python) | **Runtime** — model is called per post/comment |
+| **Runtime evaluation** | **Deterministic TypeScript**, 0 network, 0 model, reproducible | deterministic YAML engine | arbitrary Python (whatever you wrote) | non-deterministic model output |
+| **Per-post inference cost** | **$0** (model already ran at edit time) | $0 | $0 | per-post token cost |
+| **Authoring** | plain English sentence + dry-run preview | YAML DSL + regex, no preview | Python + Reddit API knowledge | varies |
+| **New-rule safety default** | **24h shadow mode** (logs, acts on nothing) then auto-promotes | live immediately on save | live immediately | usually live immediately |
+| **Pre-activation preview** | **dry-run replay** against recent posts | none | none | rare |
+| **Undo** | **per-action, 30-day, one click** | none built-in | none built-in | rare |
+| **What the LLM can do** | **hard-coded action whitelist**; `ban`/`mute` need a mod checkbox | n/a | anything the script does | whatever the prompt allows |
+| **Runaway protection** | **per-hour circuit breaker** + per-sub daily compile quota + `dryRunOnly` master switch | rate-limited by Reddit | none built-in | varies |
+| **Hosting** | **Devvit-native, no always-on server** — installed from the App Directory | Reddit-hosted | **you run a server 24/7** | usually a hosted backend |
+| **Sees Reddit content?** | LLM sees **only the mod's typed sentence**, never posts/comments | n/a | yes (your code) | yes (sent to the model) |
+
+The single load-bearing idea: **"build-time AI, runtime determinism."** AI is excellent at *translating intent into rules* and bad at *applying rules consistently*; vibe-mod uses it only for the former and uses plain TypeScript for the latter — so every runtime decision is auditable, reproducible, and free.
+
+---
+
 ## Why this exists
 
 [AutoModerator](https://www.reddit.com/wiki/automoderator/) is powerful but writing it means hand-editing
