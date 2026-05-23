@@ -16,6 +16,29 @@ _Screenshots (compose form · dry-run preview · audit log) are added once the a
 
 ---
 
+## 📦 Submission baseline & build versions (read this first)
+
+vibe-mod has **two builds that judges may encounter**, and they are deliberately not the same. This section is the canonical statement of which is which.
+
+| Build | What it is | Where it lives | Contains |
+|---|---|---|---|
+| **v0.0.49** | **Reddit App Directory listed build** — the build a judge installs from the listing | <https://developers.reddit.com/apps/vibe-mod> (approved & PUBLIC since 2026‑05‑15) | The full mod-tool flow: English→JSON compile, dry-run preview, 24h shadow, 30-day rollback, audit log, action whitelist, circuit breaker |
+| **v0.0.51** | **Repo HEAD — security-hardened build** (commit [`7ad2f85`](https://github.com/Two-Weeks-Team/vibe-mod/commit/7ad2f85)) | this repository's `main` | Everything in v0.0.49 **plus** the post-publish changes below |
+
+**Treat v0.0.49 as the canonical "install and try it" build.** Everything described in *For moderators* below is present in v0.0.49.
+
+### What changed *after* v0.0.49 (repo-only unless/until republished)
+
+These are in the repo (v0.0.50 → v0.0.51) but are **not** guaranteed to be in the App Directory build you install. Do **not** assume they are live in the listing:
+
+- **v0.0.50** (commit [`b376d88`](https://github.com/Two-Weeks-Team/vibe-mod/commit/b376d88)) — `onPostFlairUpdate` trigger, dashboard multi-line render, Chrome live-verify script.
+- **v0.0.51** (commit [`7938bd0`](https://github.com/Two-Weeks-Team/vibe-mod/commit/7938bd0), PR #54) — **security fix: removed the per-subreddit "bring-your-own OpenAI key" (BYOK) input.** Devvit subreddit-scoped settings are not encrypted (only `settings.global` with `isSecret: true` is), so a per-sub key input would have exposed a pasted key in plaintext to every moderator of the sub. v0.0.51 deletes that input; every install now compiles through the single shared, encrypted developer key under the same uniform per-subreddit daily quota.
+- **Repo HEAD also adds** a read-only multi-rule **conflict preview** (see [`docs/conflict-handling.md`](./docs/conflict-handling.md)) that is **not** in the v0.0.49 listing.
+
+> **Versioning note.** The `v0.0.x` numbers are **Devvit App Directory build numbers** assigned by the platform at `devvit publish` time. They are **not** git tags and **not** the npm `version` in `package.json` (which is an unrelated `0.1.0`). v0.0.50 and v0.0.51 were submitted to the publish re-review queue on 2026‑05‑15; **as last verified (2026‑05‑21) the App Directory still serves v0.0.49 as the approved listed build.** Promoting repo HEAD (v0.0.51) to the listing requires another Reddit review (observed turnaround ≤1 day on the v0.0.49 submission). Full version/CI/verification matrix: [`docs/release-baseline.md`](./docs/release-baseline.md).
+
+---
+
 ## Why this exists
 
 [AutoModerator](https://www.reddit.com/wiki/automoderator/) is powerful but writing it means hand-editing
