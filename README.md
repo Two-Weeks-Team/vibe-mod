@@ -173,7 +173,7 @@ Scheduler: audit retention (daily) · dry-run replay (one-shot) · shadow-promot
 - **No LLM at evaluation time.** The model runs exactly once per rule edit. The hard locks behind this
   (LLM build-time only, action whitelist, dry-run before activate, shadow default, 30-day rollback, LLM
   never sees content, v0.1 English-only) are documented in [`HANDOFF.md`](./HANDOFF.md).
-- **Tested without Devvit:** 168 unit + route tests (`app.fetch()` against Devvit/OpenAI doubles), the
+- **Tested without Devvit:** a 236-test suite (1 skipped) via `npm test` — unit + route (`app.fetch()` against Devvit/OpenAI doubles) + property-based, the
   official [`@devvit/test`](https://www.npmjs.com/package/@devvit/test) harness for the executor,
   property-based tests (fast-check) for the schema and evaluator, an `npm run acceptance` gate (G1–G4),
   an `npm run replay` local event replayer, and an `npm run openai:smoketest` that hits the real OpenAI
@@ -207,7 +207,7 @@ You never write YAML, you never write regex, and nothing vibe-mod does is perman
 ```bash
 npm install            # installs deps + git hooks (npm ci does NOT work here — esbuild EBADPLATFORM)
 npm run typecheck      # tsc --noEmit
-npm test               # 168 tests (1 skipped); npm run test:devvit for the @devvit/test harness
+npm test               # 236 tests (1 skipped); npm run test:devvit for the @devvit/test harness
 npm run acceptance     # G1..G4 exit gates
 npm run doctor         # pre-deploy preflight (devvit.json integrity, fetch-domain↔permissions, ...)
 npm run build          # tsc --noEmit && vite build → dist/server/index.cjs (CJS server bundle)

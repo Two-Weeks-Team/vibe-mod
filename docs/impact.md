@@ -17,7 +17,7 @@ These follow from the code and schema in this repo; a judge can confirm each by 
 | Reversibility of a live action | **100% within 30 days** — every live action writes a rollback token + audit entry | [`src/server/executor.ts`](../src/server/executor.ts) |
 | Actions the LLM may emit without explicit opt-in | **5** (`report`/`flair`/`lock`/`modqueue`/`remove`); `ban`/`mute`/`permaban`/`approve` require a moderator checkbox | `SAFE_ACTIONS` / `GUARDED_ACTIONS` in [`rule-schema.ts`](../src/shared/rule-schema.ts) |
 | Rules a sub can hold | hard cap **50** active rules; predicate tree depth ≤ **6** | `RuleBundle.rules.max(50)`, `MAX_TREE_DEPTH` in [`rule-schema.ts`](../src/shared/rule-schema.ts) |
-| Automated test coverage of this trust boundary | **168 unit + route tests, property-based tests (fast-check), `@devvit/test` harness, G1–G4 acceptance gates** | `npm test`, `npm run check` |
+| Automated test coverage of this trust boundary | **236 tests (1 skipped) via `npm test` — unit + route + property-based (fast-check) — plus the `@devvit/test` harness and G1–G4 acceptance gates** | `npm test`, `npm run check` |
 
 **The headline impact:** a moderator can write a rule and incur **zero risk of irreversible action for at least 24 hours**, and **zero per-post inference cost forever**, because the model has already done its one job by the time the rule is stored.
 
@@ -55,6 +55,6 @@ Each metric below has a precise definition and a data source so a pilot can fill
 
 1. Open [`src/server/evaluator.ts`](../src/server/evaluator.ts) → confirm there is **no network call** → runtime AI cost is structurally zero.
 2. Open [`rule-schema.ts`](../src/shared/rule-schema.ts) → confirm `shadow` defaults to `true` and the action whitelist is hard-coded → safety is by construction, not configuration.
-3. Run `npm test` → confirm the 168-test suite that guards the LLM→schema→whitelist boundary is green.
+3. Run `npm test` → confirm the 236-test suite (1 skipped) that guards the LLM→schema→whitelist boundary is green.
 
 Everything in §A survives that check. Everything in §B is honestly labelled **to measure**.
