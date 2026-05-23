@@ -39,6 +39,26 @@ These are in the repo (v0.0.50 → v0.0.51) but are **not** guaranteed to be in 
 
 ---
 
+## 📊 Moderator impact
+
+Split honestly into **architectural facts** (true by construction, verifiable in this repo today) and **to‑measure** metrics (defined precisely but needing a real-subreddit pilot — *not asserted as results*). Full breakdown with file-level citations: [`docs/impact.md`](./docs/impact.md).
+
+**Architectural facts (verify in code now):**
+
+| What | Value | Verify |
+|---|---|---|
+| LLM calls per post/comment at runtime | **0** (pure-TS evaluator, no network) | [`src/server/evaluator.ts`](./src/server/evaluator.ts) |
+| LLM calls per rule | exactly **1**, at edit time | [`src/server/routes/compose.ts`](./src/server/routes/compose.ts) |
+| New-rule blast radius for first 24h | **0 live actions** (shadow default on) | `shadow: true` in [`rule-schema.ts`](./src/shared/rule-schema.ts) |
+| Live action reversibility | **100% for 30 days** (per-action undo) | [`src/server/executor.ts`](./src/server/executor.ts) |
+| Reddit content sent to the LLM | **none** (only the mod's typed sentence) | README *Fetch domains* |
+
+**Metrics to measure in a pilot (defined, not claimed):** dry-run match rate · false-positive rate across the dry-run→shadow→live→undo workflow · moderator authoring/triage time saved · shadow decisions reviewed before promotion · rollback-usage and audit-open rates. Each has a definition and a data source in [`docs/impact.md`](./docs/impact.md) and is labelled **to measure**.
+
+**Headline:** a moderator incurs **zero risk of irreversible action for at least 24h** and **zero per-post inference cost forever** — the model does its one job before the rule is ever stored.
+
+---
+
 ## Why this exists
 
 [AutoModerator](https://www.reddit.com/wiki/automoderator/) is powerful but writing it means hand-editing
