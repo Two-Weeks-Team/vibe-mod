@@ -14,6 +14,7 @@ import { isCallerModerator } from '../middleware/auth';
 import { describeErr } from '../middleware/diagnostics';
 import { safeParseBundle } from '../helpers/rule-validation';
 import { estimateTokenCost } from '../helpers/openai';
+import { detectRuleConflicts, summarizeConflicts } from '../conflict';
 import type { DryRunResult } from './scheduler';
 
 export function registerDashboardRoutes(app: Hono): void {
@@ -182,6 +183,23 @@ export function registerDashboardRoutes(app: Hono): void {
       'Tokens used (lifetime)',
       `${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out (~$${totalCost.toFixed(4)} on ${llmModel})`,
     );
+
+    // Multi-rule conflict preview (read-only, non-blocking). Heuristic over
+    // active + draft rules: pairs that share a trigger and have opposing
+    // dispositions (approve vs remove/ban/queue) or set divergent flair could
+    // both fire on the same item. This surfaces them; it does NOT block
+    // promotion and is not on the runtime path. See docs/conflict-handling.md
+    // for exactly what it does and does not catch.
+    const conflicts = detectRuleConflicts([...(active?.rules ?? []), ...(draft?.rules ?? [])]);
+    if (conflicts.length > 0) {
+      addInfoBlock(
+        'conflicts',
+        `⚠ ${conflicts.length} potential rule conflict(s)`,
+        summarizeConflicts(conflicts, SEP) +
+          SEP +
+          'Review before promoting — runtime applies all matching rules in order.',
+      );
+    }
 
     // Per-rule dry-run preview (top 5). One field per rule so each is
     // browseable on its own row instead of crammed into a single textarea.
