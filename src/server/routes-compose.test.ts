@@ -432,7 +432,17 @@ describe('POST /internal/form/compose-rule-submit', () => {
         f.defaultValue,
       ]),
     );
-    expect(fieldsByName.compiledSummary).toContain('Flag low-karma posts');
+    // The rule's content now lives in dedicated helpText-backed sections — the
+    // single disabled `compiledSummary` paragraph collapsed multi-line text, so
+    // the summary was split into 📋/💬/⚙️/💰 sections whose body is in `helpText`.
+    const fieldsByHelpText = Object.fromEntries(
+      (confirmFormBody.showForm.form.fields as Array<{ name: string; helpText?: string }>).map((f) => [
+        f.name,
+        f.helpText ?? '',
+      ]),
+    );
+    expect(fieldsByHelpText.sectionRuleName).toContain('Flag low-karma posts');
+    expect(fieldsByHelpText.sectionCompiledRule.length).toBeGreaterThan(0);
     expect(typeof fieldsByName.pendingId).toBe('string');
     expect((fieldsByName.pendingId as string).length).toBeGreaterThan(0);
     // No more raw internal carriers in the modal.

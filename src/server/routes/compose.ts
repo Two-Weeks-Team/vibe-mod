@@ -353,14 +353,15 @@ export function registerComposeRoutes(app: Hono): void {
     } catch (err) {
       console.warn('[vibe-mod] submit: redis.set(todayCount) threw — quota not incremented:', describeErr(err));
     }
-    const summaryHeader = [
-      `Rule name: ${validated.name}`,
-      `Original sentence: "${validated.sourceNL}"`,
-      '',
-      humanized,
-      '',
-      `Compile cost: ${tokensIn} in / ${tokensOut} out tokens (~$${cost.toFixed(5)} on ${llmModel}).`,
-    ].join('\n');
+    // Devvit truncates/collapses disabled multi-line `paragraph` fields (lineHeight
+    // is ignored when a paragraph is disabled — see dashboard.ts for the same
+    // workaround), so the compile summary is split into 4 dedicated stacked
+    // sections whose body lives in `helpText` — the only field surface that wraps
+    // multi-line content legibly. helpText collapses `\n` to spaces, so the
+    // multi-line "Compiled rule" body substitutes newlines with a visible dot.
+    const SEP = '  ·  ';
+    const compiledBody = humanized.replace(/\n+/g, SEP);
+    const costBody = `${tokensIn} in / ${tokensOut} out tokens (~$${cost.toFixed(5)} on ${llmModel})`;
 
     return c.json<UiResponse>({
       showForm: {
@@ -373,11 +374,36 @@ export function registerComposeRoutes(app: Hono): void {
           cancelLabel: 'Cancel',
           fields: [
             {
-              name: 'compiledSummary',
-              label: 'Compiled rule',
+              name: 'sectionRuleName',
+              label: '📋 Rule name',
               type: 'paragraph',
-              defaultValue: summaryHeader,
+              defaultValue: '',
               disabled: true,
+              helpText: validated.name,
+            },
+            {
+              name: 'sectionOriginalSentence',
+              label: '💬 Original sentence',
+              type: 'paragraph',
+              defaultValue: '',
+              disabled: true,
+              helpText: `"${validated.sourceNL}"`,
+            },
+            {
+              name: 'sectionCompiledRule',
+              label: '⚙️ Compiled rule (deterministic)',
+              type: 'paragraph',
+              defaultValue: '',
+              disabled: true,
+              helpText: compiledBody,
+            },
+            {
+              name: 'sectionCompileCost',
+              label: '💰 Compile cost',
+              type: 'paragraph',
+              defaultValue: '',
+              disabled: true,
+              helpText: costBody,
             },
             {
               name: 'editInsteadOfSave',
