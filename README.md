@@ -177,7 +177,7 @@ npm run dev            # = devvit playtest (needs `devvit login` + `devvit uploa
 | `src/server/{evaluator,fact-bag,executor,devvit-helpers}.ts` | deterministic evaluator · fact bag · action executor + audit + rollback · `@devvit/web` adapters |
 | `src/server/index.ts` + `src/server/routes/*` | Hono entry (re-exports `app`) + menu / form / trigger / scheduler route modules |
 | `scripts/{acceptance,devvit-doctor,replay,openai-smoketest}.ts` | the `npm run` tooling |
-| `assets/icon.{svg,png}` | the 1024² app icon — `icon.svg` is the source, `icon.png` the rendered output |
+| `assets/icon.png` | the 1024² App Directory icon (`marketingAssets.icon` in `devvit.json`) |
 | `test/` + `vitest.devvit.config.ts` | reusable in-memory Devvit testkit + project setup + official `@devvit/test` config |
 | `docs/devvit-setup-guide.md` | **how to take this repo to a published Devvit app** (wizard → upload → settings → playtest → publish) |
 | `docs/devvit-reference.md` / `docs/devvit-conformance-notes.md` | snapshot of the non-game Devvit docs · vibe-mod ↔ Devvit-Web conformance audit |
