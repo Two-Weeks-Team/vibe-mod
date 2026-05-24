@@ -98,8 +98,21 @@ for (const host of declared) {
 // ── route ↔ devvit.json wiring (mirrors acceptance G1, kept here for the preflight) ──
 console.log('\nRoute wiring');
 if (exists('src/server/index.ts')) {
-  const indexTs = read('src/server/index.ts');
-  const routeDefined = (p: string) => indexTs.includes(`'${p}'`) || indexTs.includes(`"${p}"`);
+  // Concatenate every non-test .ts under src/server/ so the check survives the
+  // Phase 2b module split: handlers live in src/server/routes/*.ts (registered
+  // on the Hono `app` that index.ts re-exports), not inline in index.ts. This
+  // mirrors acceptance.ts's G1 `serverTs` builder — keep them in sync.
+  const serverFiles: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) serverFiles.push(full);
+    }
+  };
+  walk(join(ROOT, 'src/server'));
+  const serverTs = serverFiles.map((f) => readFileSync(f, 'utf8')).join('\n');
+  const routeDefined = (p: string) => serverTs.includes(`'${p}'`) || serverTs.includes(`"${p}"`);
   const eps = [
     ...(devvit?.menu?.items ?? []).map((m) => m.endpoint),
     ...Object.values(devvit?.forms ?? {}),
@@ -109,7 +122,7 @@ if (exists('src/server/index.ts')) {
   let bad = 0;
   for (const ep of eps) {
     if (!routeDefined(ep)) {
-      fail(`${ep} declared in devvit.json but has no app.post() route in index.ts`);
+      fail(`${ep} declared in devvit.json but has no matching app.post() route under src/server/`);
       bad++;
     }
   }
