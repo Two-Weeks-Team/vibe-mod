@@ -167,14 +167,6 @@ suite + an `npm run acceptance` gate. CI runs lint → format → `tsc` → test
 - [Terms of Service](./docs/tos.md)
 - [Privacy Policy](./docs/privacy.md)
 
-## Changelog
-
-- **0.1.0** — English→rule compiler (gpt-5.4-mini), strict schema + action whitelist (SAFE
-  `report`/`flair`/`lock`/`modqueue`/`remove`; guarded `ban`/`mute`/`permaban`/`approve`), deterministic
-  evaluator, `onPostSubmit`/`onCommentSubmit`/`onPostReport`/`onCommentReport`/`onPostFlairUpdate` triggers,
-  dry-run preview, 24h shadow mode, 30-day undo, audit log, per-hour circuit breaker, per-subreddit daily
-  compile quota, a one-time welcome message on install, and 6 seeded starter rules.
-
 ## License
 
 [MIT](./LICENSE).

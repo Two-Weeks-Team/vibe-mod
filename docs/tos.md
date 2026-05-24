@@ -1,12 +1,12 @@
 # vibe-mod — Terms of Service
 
-**Effective date:** 2026-05-27 (hackathon submission)
+**Effective date:** 2026-05-27
 **App:** vibe-mod on Reddit Developer Platform (Devvit)
-**Contact:** see r/vibe_mod modmail or the GitHub issues tracker linked from the app's developer settings page.
+**Contact:** open an issue on the [GitHub repository](https://github.com/Two-Weeks-Team/vibe-mod).
 
 ## 1. What vibe-mod is
 
-vibe-mod is a Reddit moderation tool that lets the moderators of a subreddit ("you") write rules in plain English. vibe-mod translates each rule into a deterministic JSON specification and then evaluates incoming posts and comments against the active rules. It can take moderation actions on your behalf (remove, lock, send to mod queue, flair, modmail, or — with explicit confirmation — ban or mute).
+vibe-mod is a Reddit moderation tool that lets the moderators of a subreddit ("you") write rules in plain English. vibe-mod translates each rule into a deterministic JSON specification and then evaluates incoming posts and comments against the active rules. It can take moderation actions on your behalf (report, flair, lock, send to mod queue, or remove — or, only with your explicit opt-in, ban, mute, permaban, or approve).
 
 vibe-mod is a third-party app built on Reddit's Developer Platform. It is **not** an official Reddit product.
 
@@ -39,7 +39,7 @@ vibe-mod **does not**:
 
 - Read or send Reddit user content (post bodies, comment bodies, usernames, voting history, browsing history, DMs, etc.) to OpenAI or any third party. The LLM only ever sees the **moderator's own typed rule sentence**. Rule evaluation is deterministic and runs entirely inside Devvit.
 - Take actions outside your subreddit.
-- Take ban / mute / permaban actions automatically. Those actions are only emitted when the moderator who wrote the rule explicitly enabled the "Allow ban/mute" checkbox.
+- Take ban / mute / permaban / approve actions automatically. Those actions are only emitted when the moderator who wrote the rule explicitly enabled the "guarded actions" checkbox.
 - Share data across subreddits. Each installation's Redis is namespaced and isolated.
 - Train any model on your data. vibe-mod does not collect data for model training.
 
