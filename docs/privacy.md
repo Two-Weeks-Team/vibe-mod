@@ -66,4 +66,4 @@ This policy may be updated. The effective date above reflects the most recent ve
 
 ## 11. Contact
 
-Open an issue on the GitHub repository linked from `developers.reddit.com/apps/vibe-mod`, or message r/vibe_mod on Reddit.
+Open an issue on the [GitHub repository](https://github.com/Two-Weeks-Team/vibe-mod) linked from `developers.reddit.com/apps/vibe-mod`.

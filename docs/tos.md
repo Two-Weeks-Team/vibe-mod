@@ -2,7 +2,7 @@
 
 **Effective date:** 2026-05-27
 **App:** vibe-mod on Reddit Developer Platform (Devvit)
-**Contact:** see r/vibe_mod modmail or the GitHub issues tracker linked from the app's developer settings page.
+**Contact:** open an issue on the [GitHub repository](https://github.com/Two-Weeks-Team/vibe-mod).
 
 ## 1. What vibe-mod is
 
