@@ -1,10 +1,15 @@
-# vibe-mod
+<div align="center">
 
-**Write a moderation rule in plain English. It runs deterministically — shadow-tested first, with one-click undo.**
+<img src="./assets/banner.jpg" alt="vibe-mod — you write the rules in plain English, the AI builds the mod config. Natural language in, mod config out." width="880">
+
+<strong>Write a moderation rule in plain English.<br>It runs deterministically — shadow-tested first, with one-click undo.</strong>
 
 [![CI](https://github.com/Two-Weeks-Team/vibe-mod/actions/workflows/ci.yml/badge.svg)](https://github.com/Two-Weeks-Team/vibe-mod/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Reddit App Directory](https://img.shields.io/badge/Reddit%20App%20Directory-Live-FF4500?logo=reddit&logoColor=white)](https://developers.reddit.com/apps/vibe-mod)
 &nbsp;·&nbsp; Built on [Reddit Devvit](https://developers.reddit.com/)
+
+</div>
 
 > A moderator types *"Send to mod queue any post under 50 characters from accounts less than 7 days old."*
 > vibe-mod compiles that sentence into a **deterministic JSON rule**, runs it in **24-hour shadow mode**
@@ -226,7 +231,3 @@ This app makes outbound HTTP requests to exactly one external domain:
 ## License
 
 [MIT](./LICENSE).
-
----
-
-<sub>Built for the Reddit *Mod Tools and Migrated Apps Hackathon* (Best New Mod Tool).</sub>
