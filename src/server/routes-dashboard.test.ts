@@ -143,6 +143,50 @@ describe('POST /internal/menu/dashboard', () => {
     expect(text).toContain('would match 1/10 recent post(s) → modqueue');
     expect(text).toContain('comment events; shadow mode it');
   });
+
+  it('surfaces a multi-rule conflict warning when two active rules disagree (approve vs remove)', async () => {
+    asMod();
+    const base = seedStarterRules(1);
+    await fakeRedis.set(
+      'testsub:rules:active',
+      JSON.stringify({
+        ...base,
+        rules: [
+          {
+            id: 'r_keep_regulars',
+            name: 'approve trusted regulars',
+            sourceNL: 'approve posts from verified contributors',
+            on: ['onPostSubmit'],
+            when: { fact: 'author.flairText', op: 'contains', value: 'verified' },
+            then: [{ action: 'approve', params: {} }],
+            createdAt: 1,
+            createdBy: 't2_seed',
+            enabled: true,
+            shadow: true,
+          },
+          {
+            id: 'r_drop_newbies',
+            name: 'remove brand-new accounts',
+            sourceNL: 'remove posts from accounts under a day old',
+            on: ['onPostSubmit'],
+            when: { fact: 'author.accountAgeHours', op: 'lt', value: 24 },
+            then: [{ action: 'remove', params: { spam: false } }],
+            createdAt: 1,
+            createdBy: 't2_seed',
+            enabled: true,
+            shadow: true,
+          },
+        ],
+      }),
+    );
+    const body = await (
+      await call('/internal/menu/dashboard', { location: 'subreddit', targetId: 't5_testsub' })
+    ).json();
+    const text = dashTexts(body);
+    expect(text).toContain('potential rule conflict');
+    expect(text).toContain('r_keep_regulars');
+    expect(text).toContain('r_drop_newbies');
+  });
 });
 
 // Phase 1.7b — dashboard is now read-only (audit Tier-2 #3 + #10).
