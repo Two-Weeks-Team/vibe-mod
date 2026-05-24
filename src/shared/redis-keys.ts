@@ -10,8 +10,7 @@
 //      string; we never want a typo'd `${foo}:rules:Active` to silently
 //      shadow `${foo}:rules:active`.
 //   3. The full key inventory lives in one place — useful for ops (TTL
-//      sweeps), tests (mocking), and the gap analysis at
-//      claudedocs/gap-analysis/05-code-architecture.md.
+//      sweeps) and tests (mocking).
 
 /** Build a subreddit-scoped Redis key namespace. */
 export const keys = {

@@ -25,7 +25,6 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run test:devvit && npm run acceptance",
     "replay": "tsx scripts/replay.ts",
     "doctor": "tsx scripts/devvit-doctor.ts",
-    "build:icon": "tsx scripts/build-icon.ts",
     "openai:smoketest": "tsx scripts/openai-smoketest.ts",
     "settings:set:openai": "devvit settings set openaiApiKey",
     "prepare": "simple-git-hooks"
