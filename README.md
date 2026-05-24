@@ -100,7 +100,7 @@ vibe-mod is **not** an AutoModerator natural-language wrapper, and **not** an LL
 | **New-rule safety default** | **24h shadow mode** (logs, acts on nothing) then auto-promotes | live immediately on save | live immediately | usually live immediately |
 | **Pre-activation preview** | **dry-run replay** against recent posts | none | none | rare |
 | **Undo** | **per-action, 30-day, one click** | none built-in | none built-in | rare |
-| **What the LLM can do** | **hard-coded action whitelist**; `ban`/`mute` need a mod checkbox | n/a | anything the script does | whatever the prompt allows |
+| **What the LLM can do** | **hard-coded action whitelist**; `ban`/`mute`/`permaban`/`approve` need a mod checkbox | n/a | anything the script does | whatever the prompt allows |
 | **Runaway protection** | **per-hour circuit breaker** + per-sub daily compile quota + `dryRunOnly` master switch | rate-limited by Reddit | none built-in | varies |
 | **Hosting** | **Devvit-native, no always-on server** — installed from the App Directory | Reddit-hosted | **you run a server 24/7** | usually a hosted backend |
 | **Sees Reddit content?** | LLM sees **only the mod's typed sentence**, never posts/comments | n/a | yes (your code) | yes (sent to the model) |
@@ -135,13 +135,16 @@ evaluation at runtime is plain TypeScript — no network, no model, fully reprod
 - **30-day rollback.** Any time vibe-mod acts on a post/comment, *"vibe-mod: Undo this action"* appears on
   that item's `⋯` menu for 30 days. One click restores it.
 - **Safety brakes.** An action whitelist (`report` / `flair` / `lock` / `modqueue` / `remove` are
-  LLM-permitted; `ban`/`mute` require an explicit moderator checkbox), a per-hour action circuit breaker,
-  a per-subreddit daily compile quota, and a sub-level `dryRunOnly` master switch.
+  LLM-permitted; `ban` / `mute` / `permaban` / `approve` are *guarded* — the compiler refuses to store
+  them until the moderator ticks an explicit "enable guarded actions" checkbox), a per-hour action
+  circuit breaker, a per-subreddit daily compile quota, and a sub-level `dryRunOnly` master switch.
 - **Audit log.** Every shadow decision and every live action is recorded (Redis ZSet, 30-day retention),
   visible under *"vibe-mod: View rules + log"*.
 
-Five starter rules (ALL-CAPS titles, very short low-karma posts, etc.) are seeded as drafts on install so
-mods have something to look at — all in SAFE actions, all shadow-first.
+Six starter rules (ALL-CAPS titles, very short low-karma posts, a flair-driven example, etc.) are seeded
+as drafts on first install so mods have something to look at — all in SAFE actions, all shadow-first. The
+same first-install hook also sends the mod team a one-time **welcome modmail** (idempotent + retry-safe via
+a Redis sentinel), so onboarding is never a blank screen.
 
 ---
 
@@ -158,7 +161,7 @@ OpenAI gpt-5.4-mini   ──►  JSON  ──►  Zod strict parse + action whit
         ▼
 rules:active (Redis)
         │
-Reddit triggers (onPostSubmit / onCommentSubmit / onPostReport / onCommentReport)
+Reddit triggers (onPostSubmit / onCommentSubmit / onPostReport / onCommentReport / onPostFlairUpdate)
         ▼
 Deterministic evaluator (pure TS, 0 network, 0 LLM)
         │   builds a "fact bag" from the post/comment + account + subreddit-scoped Redis state
@@ -251,7 +254,8 @@ This app makes outbound HTTP requests to exactly one external domain:
 ## Permissions
 
 - `reddit` (scope `moderator`) — to take moderation actions (report / flair / lock / modqueue / remove;
-  ban or mute only with an explicit moderator checkbox).
+  ban / mute / permaban / approve only with an explicit moderator checkbox) and to send the one-time
+  install-time welcome modmail.
 - `redis` — to store compiled rules, the audit log, rollback tokens, and quota counters.
 - `http` (domain `api.openai.com`) — to compile English rules into JSON, as above.
 
@@ -270,8 +274,10 @@ This app makes outbound HTTP requests to exactly one external domain:
 ## Changelog
 
 - **0.1.0** — initial release: English→JSON rule compiler (gpt-5.4-mini), strict Zod schema + action
-  whitelist, deterministic evaluator, dry-run preview, 24h shadow mode, 30-day rollback, audit log,
-  per-hour circuit breaker, per-sub daily compile quota, 5 seeded starter rules. (Pre-publish; see
+  whitelist (SAFE `report`/`flair`/`lock`/`modqueue`/`remove`; guarded `ban`/`mute`/`permaban`/`approve`),
+  deterministic evaluator, `onPostSubmit`/`onCommentSubmit`/`onPostReport`/`onCommentReport`/`onPostFlairUpdate`
+  triggers, dry-run preview, 24h shadow mode, 30-day rollback, audit log, per-hour circuit breaker, per-sub
+  daily compile quota, a one-time install welcome modmail, and 6 seeded starter rules. (Pre-publish; see
   `HANDOFF.md` for what's verified vs. pending `devvit playtest`.)
 
 ## License
