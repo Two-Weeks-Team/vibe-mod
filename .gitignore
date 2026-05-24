@@ -32,8 +32,11 @@ Thumbs.db
 # Generated docs
 docs/*.html
 
-# Chrome verify automation (Python venv + Playwright artifacts)
-# These contain Reddit session cookies + page captures with potential PII.
+# Chrome verify/recording automation (Python venv + Playwright artifacts).
+# Kept on disk locally for demo capture but never published — these read the
+# operator's live Reddit session cookies at runtime and the automation approach
+# itself stays private.
 .venv-chrome-auth/
 playwright/
 scripts/__pycache__/
+scripts/chrome-reddit-*.py
