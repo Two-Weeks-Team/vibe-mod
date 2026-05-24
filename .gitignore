@@ -39,4 +39,16 @@ docs/*.html
 .venv-chrome-auth/
 playwright/
 scripts/__pycache__/
-scripts/chrome-reddit-*.py
+scripts/*.py
+
+# Internal working docs — kept on disk locally, not part of the public submission repo.
+claudedocs/
+docs/devpost-submission.md
+docs/demo-scenario.md
+docs/postmortems/
+docs/new-mod-checklist.md
+docs/README-vibe-mod.md
+docs/release-baseline.md
+docs/impact.md
+docs/demo-narration-script.md
+HANDOFF.md
