@@ -207,7 +207,7 @@ strong, b { font-weight: 600; color: var(--ink); }
    HERO
    ============================================================ */
 .hero {
-  padding-block: clamp(2.75rem, 7vw, 6rem) clamp(3rem, 7vw, 6.5rem);
+  padding-block: clamp(1.5rem, 3vw, 2.75rem) clamp(2.75rem, 6vw, 5rem);
   position: relative;
 }
 .hero-kicker {
@@ -227,11 +227,11 @@ strong, b { font-weight: 600; color: var(--ink); }
 }
 
 .hero-h1 {
-  font-size: var(--step-4);
+  font-size: clamp(2.4rem, 1.55rem + 3vw, 4.25rem);
   font-weight: 400;
-  line-height: 1.02;
+  line-height: 1.04;
   letter-spacing: -0.02em;
-  max-width: 18ch;
+  max-width: 20ch;
   text-wrap: pretty;
 }
 /* explicit line breaks drive desktop; collapse them on narrow widths so
@@ -362,7 +362,7 @@ strong, b { font-weight: 600; color: var(--ink); }
 
 /* Live typing + rolling examples (JS adds .is-live on .compiler; static fallback otherwise) */
 .compiler-in { min-height: 2.6em; }
-.compiler-out { min-height: 3.4em; }
+.compiler-out { min-height: 5.1em; }
 .compiler.is-live .compiler-in::after {
   content: "";
   display: inline-block;
