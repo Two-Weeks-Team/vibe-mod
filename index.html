@@ -947,7 +947,7 @@ table.cmp {
 .cmp colgroup col:nth-child(4) { width: 24%; }
 table.cmp caption { text-align: left; }
 .cmp th, .cmp td {
-  text-align: left;
+  text-align: center;
   padding: 0.95rem 1.1rem;
   vertical-align: middle;
   border-bottom: 1px solid var(--rule);
@@ -999,18 +999,23 @@ table.cmp caption { text-align: left; }
 
 /* verifiable numbers — a spec ledger, not a metric grid.
    Each line: mono slug · serif value · run-in description. */
+/* verifiable numbers as a five-card ledger row */
 .facts {
   margin: clamp(2.5rem, 5vw, 4rem) 0 0;
   border-top: 1px solid var(--rule-strong);
+  padding-top: clamp(1.75rem, 3.5vw, 2.5rem);
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 .fact {
-  display: grid;
-  grid-template-columns: minmax(7rem, 12ch) minmax(7rem, 9ch) 1fr;
-  align-items: baseline;
-  gap: 0.4rem clamp(1rem, 3vw, 2.25rem);
-  padding: clamp(0.85rem, 2vw, 1.15rem) 0;
-  border-bottom: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0 clamp(0.9rem, 2vw, 1.5rem);
 }
+.fact + .fact { border-left: 1px solid var(--rule); }
+.fact:first-child { padding-left: 0; }
+.fact:last-child { padding-right: 0; }
 .fact .slug {
   font-family: var(--mono);
   font-size: 0.66rem;
@@ -1023,7 +1028,7 @@ table.cmp caption { text-align: left; }
   margin: 0;
   font-family: var(--serif);
   font-weight: 400;
-  font-size: var(--step-1);
+  font-size: clamp(1.55rem, 1.3rem + 1vw, 2.2rem);
   line-height: 1;
   letter-spacing: -0.015em;
   color: var(--ink);
@@ -1031,10 +1036,7 @@ table.cmp caption { text-align: left; }
   white-space: nowrap;
 }
 .fact .num .accent { color: var(--accent); }
-.fact .num .unit { font-size: 0.62em; color: var(--ink-faint); margin-left: 0.15em; }
-/* lead row gets the headline "0" — uneven emphasis, not five equal cells */
-.fact.is-lead .num { font-size: var(--step-3); }
-.fact.is-lead .num .accent { font-style: italic; }
+.fact .num .unit { font-size: 0.5em; color: var(--ink-faint); margin-left: 0.12em; }
 .fact .lbl {
   margin: 0;
   font-size: var(--step--1);
@@ -1046,13 +1048,21 @@ table.cmp caption { text-align: left; }
   font-size: 0.86em;
   color: var(--ink-faint);
 }
-@media (max-width: 640px) {
-  .fact {
-    grid-template-columns: 1fr;
-    gap: 0.25rem;
-    padding-block: clamp(0.9rem, 3vw, 1.1rem);
+@media (max-width: 860px) {
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: clamp(1.4rem, 4vw, 2rem); }
+  .fact + .fact { border-left: none; }
+  .fact { padding: 0 1.5rem; }
+  .fact:nth-child(odd) { padding-left: 0; }
+  .fact:nth-child(even) { border-left: 1px solid var(--rule); }
+}
+@media (max-width: 520px) {
+  .facts { grid-template-columns: 1fr; row-gap: 0; }
+  .fact, .fact:nth-child(odd), .fact:nth-child(even) {
+    padding: 0.9rem 0;
+    border-left: none;
+    border-top: 1px solid var(--rule);
   }
-  .fact .slug { order: -1; }
+  .fact:first-child { border-top: none; padding-top: 0; }
 }
 
 /* ============================================================
