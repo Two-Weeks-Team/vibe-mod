@@ -40,6 +40,7 @@ Vitest, @devvit/test, GitHub Actions
 
 ### Media Assets
 
+- Devpost thumbnail, 3:2: `assets/devpost-thumbnail.jpg`
 - App icon: `assets/icon.png`
 - Banner: `assets/banner.jpg`
 - Landing page with visual walkthrough: https://two-weeks-team.github.io/vibe-mod/
