@@ -611,18 +611,17 @@ strong, b { font-weight: 600; color: var(--ink); }
 /* ============================================================
    HOW IT WORKS
    ============================================================ */
-.steps { display: grid; gap: clamp(2.5rem, 5vw, 4.5rem); }
+.steps { display: grid; gap: clamp(2.75rem, 5.5vw, 5rem); }
+/* every step reads the same direction — text left, screenshot right — so the
+   eye flows straight down 01 -> 02 -> 03 instead of zig-zagging */
 .step {
   display: grid;
-  grid-template-columns: minmax(0, 0.62fr) minmax(0, 1.38fr);
-  gap: clamp(1.5rem, 4vw, 3.5rem);
-  align-items: start;
+  grid-template-columns: minmax(0, 0.46fr) minmax(0, 0.54fr);
+  gap: clamp(1.75rem, 4vw, 3.75rem);
+  align-items: center;
 }
-.step-text { padding-top: 0.4rem; }
-.step:nth-child(even) { direction: rtl; }
-.step:nth-child(even) > * { direction: ltr; }
 @media (max-width: 860px) {
-  .step, .step:nth-child(even) { grid-template-columns: 1fr; direction: ltr; gap: 1.5rem; }
+  .step { grid-template-columns: 1fr; gap: 1.5rem; }
 }
 .step-text .step-marker {
   font-family: var(--mono);
@@ -1229,9 +1228,9 @@ table.cmp caption { text-align: left; }
           <span class="step-eg"><span class="lbl">You type</span>&ldquo;Send brand-new accounts&rsquo; short posts to the mod queue.&rdquo;</span>
         </div>
         <figure>
-          <div class="ui-frame is-portrait">
-            <img src="assets/ui-confirm.png" width="760" height="1116" loading="lazy" decoding="async"
-              alt="The vibe-mod Confirm form, titled &quot;Confirm: brand-new start post, not mod queue&quot;, showing the rule and the compiled deterministic logic before it is saved." />
+          <div class="ui-frame">
+            <img src="assets/ui-confirm-crop.png" width="656" height="724" loading="lazy" decoding="async"
+              alt="The vibe-mod Confirm form, titled &quot;Confirm: brand-new short post, mod queue&quot;, showing the rule name, original sentence, and the compiled deterministic logic before it is saved." />
           </div>
           <figcaption><b>Confirm form.</b> The compiled rule and its token cost, shown back to you before anything is saved.</figcaption>
         </figure>
@@ -1246,8 +1245,8 @@ table.cmp caption { text-align: left; }
           <span class="step-eg"><span class="lbl">It compiles to</span>author.accountAgeHours lt 24 &rarr; modqueue</span>
         </div>
         <figure>
-          <div class="ui-frame is-portrait">
-            <img src="assets/ui-clarify.png" width="760" height="911" loading="lazy" decoding="async"
+          <div class="ui-frame">
+            <img src="assets/ui-clarify-crop.png" width="676" height="628" loading="lazy" decoding="async"
               alt="The vibe-mod Clarify dialog, titled &quot;Clarify the rule&quot;, asking what counts as a brand-new account with a selectable option for accounts under 24 hours old." />
           </div>
           <figcaption><b>Clarify modal.</b> &ldquo;What counts as a brand-new account?&rdquo; &mdash; you choose the threshold; it never assumes one.</figcaption>
@@ -1262,9 +1261,9 @@ table.cmp caption { text-align: left; }
           <span class="step-eg"><span class="lbl">Lifetime cost on this sub</span>$0.0019 across 6 compiles &middot; 0 AI calls at runtime</span>
         </div>
         <figure>
-          <div class="ui-frame is-portrait">
-            <img src="assets/ui-dashboard.png" width="760" height="1021" loading="lazy" decoding="async"
-              alt="The vibe-mod dashboard showing a dry-run preview of rules and the lifetime compile cost for the subreddit." />
+          <div class="ui-frame">
+            <img src="assets/ui-dashboard-crop.png" width="664" height="664" loading="lazy" decoding="async"
+              alt="The vibe-mod dashboard modal showing active and draft rule counts, recent actions, and lifetime token cost for the subreddit." />
           </div>
           <figcaption><b>Dashboard.</b> Dry-run previews and lifetime compile cost, all in one place.</figcaption>
         </figure>
