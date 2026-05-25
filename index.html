@@ -764,18 +764,17 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
 /* title and its description stack vertically — one connected header block */
 .breadth-intro {
   margin-bottom: clamp(2rem, 4vw, 3rem);
-  max-width: 60ch;
+  max-width: 54rem;
 }
 .breadth-intro h2 {
   font-size: var(--step-3);
   font-weight: 400;
   letter-spacing: -0.02em;
   line-height: 1.03;
-  max-width: 13ch;
   margin-bottom: clamp(0.85rem, 2vw, 1.2rem);
 }
 .breadth-intro h2 em { font-style: italic; color: var(--accent); }
-.breadth-intro .prose { color: var(--ink-soft); font-size: var(--step-0); line-height: 1.5; }
+.breadth-intro .prose { color: var(--ink-soft); font-size: var(--step-0); line-height: 1.5; max-width: none; }
 
 .pairs {
   border-top: 1px solid var(--rule-strong);
@@ -1315,7 +1314,7 @@ table.cmp caption { text-align: left; }
 
     <div class="breadth-intro">
       <h2>Any rule you can <em>describe</em>.</h2>
-      <p class="prose">A sentence on the left; the deterministic predicate it compiles into on the right. Real examples, exactly as vibe-mod renders them.</p>
+      <p class="prose">A sentence on the left; the deterministic predicate it compiles into on the right.<br>Real examples, exactly as vibe-mod renders them.</p>
     </div>
 
     <div class="pairs" role="list" aria-label="Plain-English rules and the deterministic logic they compile into">
@@ -1392,7 +1391,7 @@ table.cmp caption { text-align: left; }
       <div class="pair is-more" role="listitem">
         <span class="pair-in"><span class="more-plus" aria-hidden="true">+</span>&hellip;or anything else you can put into a sentence.</span>
         <span class="pair-mid" aria-hidden="true">&rarr;</span>
-        <code class="pair-out"><b>34</b> signals <span class="op">&times;</span> <b>9</b> operators <span class="op">&times;</span> <b>9</b> actions, freely composed with <span class="tok">&and; &or; &not;</span> <span class="op">&rarr;</span> <span class="act">thousands of rules</span></code>
+        <code class="pair-out">Mix <b>34</b> signals, <b>9</b> operators &amp; <b>9</b> actions with <span class="tok" style="white-space:nowrap">and / or / not</span> <span class="op">&mdash;</span> <span class="act">thousands of possible rules</span></code>
       </div>
     </div>
 
