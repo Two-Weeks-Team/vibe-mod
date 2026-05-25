@@ -733,6 +733,24 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
 .ui-frame.is-portrait img { max-height: 30rem; object-fit: contain; }
 /* landscape crop (removed + locked header) sits full-width of its column */
 .ui-frame.is-landscape img { object-fit: cover; }
+/* modal-only crop: a clean white dialog floating on the paper, no mat —
+   the PNG already has transparent rounded corners, so a soft shadow reads
+   as a real popped-out modal */
+.ui-frame.is-modal {
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+  max-width: 33rem;
+}
+.ui-frame.is-modal img {
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  box-shadow:
+    0 24px 50px -28px color-mix(in oklch, var(--ink) 55%, transparent),
+    0 4px 12px -7px color-mix(in oklch, var(--ink) 30%, transparent);
+}
 
 /* ============================================================
    BREADTH — input -> compiled pairs
@@ -1228,8 +1246,8 @@ table.cmp caption { text-align: left; }
           <span class="step-eg"><span class="lbl">You type</span>&ldquo;Send brand-new accounts&rsquo; short posts to the mod queue.&rdquo;</span>
         </div>
         <figure>
-          <div class="ui-frame">
-            <img src="assets/ui-confirm-crop.png" width="656" height="724" loading="lazy" decoding="async"
+          <div class="ui-frame is-modal">
+            <img src="assets/ui-confirm-modal.png" width="619" height="641" loading="lazy" decoding="async"
               alt="The vibe-mod Confirm form, titled &quot;Confirm: brand-new short post, mod queue&quot;, showing the rule name, original sentence, and the compiled deterministic logic before it is saved." />
           </div>
           <figcaption><b>Confirm form.</b> The compiled rule and its token cost, shown back to you before anything is saved.</figcaption>
@@ -1245,8 +1263,8 @@ table.cmp caption { text-align: left; }
           <span class="step-eg"><span class="lbl">It compiles to</span>author.accountAgeHours lt 24 &rarr; modqueue</span>
         </div>
         <figure>
-          <div class="ui-frame">
-            <img src="assets/ui-clarify-crop.png" width="676" height="628" loading="lazy" decoding="async"
+          <div class="ui-frame is-modal">
+            <img src="assets/ui-clarify-modal.png" width="619" height="641" loading="lazy" decoding="async"
               alt="The vibe-mod Clarify dialog, titled &quot;Clarify the rule&quot;, asking what counts as a brand-new account with a selectable option for accounts under 24 hours old." />
           </div>
           <figcaption><b>Clarify modal.</b> &ldquo;What counts as a brand-new account?&rdquo; &mdash; you choose the threshold; it never assumes one.</figcaption>
@@ -1261,8 +1279,8 @@ table.cmp caption { text-align: left; }
           <span class="step-eg"><span class="lbl">Lifetime cost on this sub</span>$0.0019 across 6 compiles &middot; 0 AI calls at runtime</span>
         </div>
         <figure>
-          <div class="ui-frame">
-            <img src="assets/ui-dashboard-crop.png" width="664" height="664" loading="lazy" decoding="async"
+          <div class="ui-frame is-modal">
+            <img src="assets/ui-dashboard-modal.png" width="619" height="640" loading="lazy" decoding="async"
               alt="The vibe-mod dashboard modal showing active and draft rule counts, recent actions, and lifetime token cost for the subreddit." />
           </div>
           <figcaption><b>Dashboard.</b> Dry-run previews and lifetime compile cost, all in one place.</figcaption>
