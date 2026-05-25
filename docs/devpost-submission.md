@@ -1,4 +1,4 @@
-# vibe-mod - Devpost Submission Copy
+# vibe-mod - AI Rule Factory for Reddit Mods
 
 Generated: 2026-05-26 KST  
 Hackathon: Reddit Mod Tools and Migrated Apps Hackathon  
@@ -14,12 +14,16 @@ GitHub repo and landing page.
 
 ### Project Name
 
-vibe-mod
+vibe-mod - AI Rule Factory for Reddit Mods
+
+Use the full name above in Devpost's **Project name** field. It stays within
+the 60-character limit while making the core wow point visible before judges
+open the project page.
 
 ### Tagline
 
-Write a moderation rule in plain English. vibe-mod compiles it once, runs it
-deterministically, shadows it first, and keeps one-click undo.
+AI rule factory for Reddit mods: write a rule in plain English, compile it once,
+run deterministic TypeScript, shadow first, and keep 30-day undo.
 
 ### Category
 
@@ -47,12 +51,12 @@ Vitest, @devvit/test, GitHub Actions
 
 ## Summary
 
-vibe-mod lets a Reddit moderator type a rule in plain English, such as "send
-links from accounts under 7 days old to the mod queue," and turns it into a
-validated, deterministic moderation rule. The AI is used only when the moderator
-writes the rule. Once the rule is saved, every post and comment is evaluated by
-plain TypeScript: no model call, no network call, no per-post token cost, and no
-Reddit content sent to the model.
+vibe-mod is an AI rule factory for Reddit moderators. A moderator types a rule
+in plain English, such as "send links from accounts under 7 days old to the mod
+queue," and vibe-mod turns it into a validated, deterministic moderation rule.
+The AI is used only when the moderator writes the rule. Once the rule is saved,
+every post and comment is evaluated by plain TypeScript: no model call, no
+network call, no per-post token cost, and no Reddit content sent to the model.
 
 The product is built around trust. Every new rule starts in dry-run/shadow mode,
 the moderator sees a preview before activation, live actions are capped by a
