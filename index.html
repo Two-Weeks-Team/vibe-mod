@@ -440,8 +440,11 @@ strong, b { font-weight: 600; color: var(--ink); }
   display: grid;
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   gap: clamp(2rem, 5vw, 4.5rem);
-  align-items: start;
+  align-items: stretch;
 }
+/* the two options distribute to fill the (taller) left column's height,
+   so the columns read as balanced rather than the right ending early */
+.options { align-content: space-between; }
 @media (max-width: 880px) {
   .problem-grid { grid-template-columns: 1fr; gap: 2.5rem; }
 }
