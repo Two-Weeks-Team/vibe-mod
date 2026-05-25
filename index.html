@@ -1048,6 +1048,21 @@ table.cmp caption { text-align: left; }
   font-size: 0.86em;
   color: var(--ink-faint);
 }
+.fact .free-badge {
+  display: inline-block;
+  margin-left: 0.45em;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border: 1px solid color-mix(in oklch, var(--accent) 32%, transparent);
+  border-radius: 100px;
+  padding: 0.14em 0.5em;
+  vertical-align: 0.08em;
+}
 @media (max-width: 860px) {
   .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: clamp(1.4rem, 4vw, 2rem); }
   .fact + .fact { border-left: none; }
@@ -1069,11 +1084,12 @@ table.cmp caption { text-align: left; }
    CTA FOOTER
    ============================================================ */
 .cta-foot {
-  border-top: 1px solid var(--rule-strong);
   background:
     linear-gradient(to bottom, var(--paper) 0%, var(--paper-sunk) 100%);
 }
-.cta-foot .shell { padding-block: clamp(4rem, 9vw, 8rem); }
+/* divider sits on the content-width shell (var(--rule)) like every other
+   section, not edge-to-edge across the full-bleed footer */
+.cta-foot .shell { padding-block: clamp(4rem, 9vw, 8rem); border-top: 1px solid var(--rule); }
 .cta-foot .kicker {
   font-family: var(--mono);
   font-size: var(--step--1);
@@ -1568,9 +1584,9 @@ table.cmp caption { text-align: left; }
         <dd class="lbl">LLM calls per post once a rule is live&#8202;&mdash;&#8202;pure deterministic code.</dd>
       </div>
       <div class="fact">
-        <dt class="slug">compile</dt>
+        <dt class="slug">compile <span class="free-badge">free</span></dt>
         <dd class="num">~$0.0003</dd>
-        <dd class="lbl">per compile on <code>gpt-5.4-mini</code>, the only time a model runs.</dd>
+        <dd class="lbl">what a compile costs on <code>gpt-5.4-mini</code> &mdash; on us, never you.</dd>
       </div>
       <div class="fact">
         <dt class="slug">on us</dt>
