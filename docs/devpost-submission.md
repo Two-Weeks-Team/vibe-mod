@@ -22,8 +22,8 @@ open the project page.
 
 ### Elevator Pitch
 
-Say the rule. Ship safe subreddit moderation. vibe-mod covers AI compile cost,
-then runs deterministic checks with $0 per-post AI cost and 30-day undo.
+Say the rule. Run safer subreddit moderation. vibe-mod covers AI compile cost,
+then enforces deterministic checks with $0 per-post AI cost and 30-day undo.
 
 ### Category
 
@@ -49,119 +49,91 @@ Vitest, @devvit/test, GitHub Actions
 - Banner: `assets/banner.jpg`
 - Landing page with visual walkthrough: https://two-weeks-team.github.io/vibe-mod/
 
-## Summary
+## Project Story
 
-vibe-mod lets Reddit moderators say the rule they want and ship it as safe
-subreddit moderation. A moderator types a rule in plain English, such as "send
-links from accounts under 7 days old to the mod queue," and vibe-mod turns it
-into a validated, deterministic moderation rule. Moderators do not need an
-OpenAI key or billing account: vibe-mod covers AI compilation up to the daily
-quota, then every saved rule runs as plain TypeScript with $0 per-post AI cost,
-no model call, no network call, and no Reddit content sent to the model.
-
-The product is built around trust. Every new rule starts in dry-run/shadow mode,
-the moderator sees a preview before activation, live actions are capped by a
-rate limiter, and every action carries a 30-day undo path. It is not an AI judge
-for Reddit content; it is a rule compiler for moderators.
+Copy from **Inspiration** through **What's next** into Devpost's **About the
+project** field. Keep the later impact and compliance notes as reference unless
+there is room for an extra section.
 
 ## Inspiration
 
-AutoModerator is powerful, but it asks moderators to think in YAML, regular
-expressions, and exact syntax. Many mod teams know the rule they want in normal
-language but do not have a specialist who can safely translate that intent into
-configuration. A small typo can remove the wrong posts, and a newly saved rule
-can go live before anyone sees its effect.
+Most subreddit rules start as a sentence, not YAML. A mod sees the same pattern
+all week - fresh accounts dropping links, ALL-CAPS titles, short low-effort
+posts - and knows exactly what should happen. The hard part is turning that
+judgment into automation that is safe enough to run on a live community.
 
-We wanted the ease of a natural-language interface without turning moderation
-into a black-box AI decision. The useful job for a language model here is not
-"judge this post." The useful job is "compile this moderator's intent into a
-structured rule." vibe-mod keeps that boundary strict: the model sees only the
-moderator's typed rule sentence, never post bodies, comment bodies, usernames,
-or community content.
+AutoModerator is powerful, but it asks volunteer mod teams to maintain YAML,
+regex, and exact syntax. A small mistake can catch the wrong posts, and a new
+rule can affect a community before anyone has seen what it would do.
 
-That gives moderators a safer path: describe the rule, inspect the compiled
-logic, preview matches, let the rule observe in shadow mode, and undo any action
-if needed.
+The product line became: **say it, ship subreddit rules**. The safety line
+became just as important: the model can help write the rule, but it should never
+be the judge of the community.
 
-## What It Does
+We built vibe-mod for the gap between "I know the rule I want" and "I trust this
+rule enough to turn it on."
 
-vibe-mod adds moderator-only Devvit menu actions to a subreddit:
+## What it does
 
-1. **Compose rule**: a moderator writes a rule in plain English and clicks
-   Compile + Preview. OpenAI gpt-5.4-mini translates the sentence into a JSON
-   rule. vibe-mod then validates that output with a strict Zod schema and an
-   action whitelist before it can be stored.
-2. **Preview and clarify**: if the sentence is ambiguous, vibe-mod asks a
-   clarifying question instead of guessing. If it compiles, the moderator sees a
-   dry-run preview against recent posts before activation.
-3. **Shadow-first activation**: new rules default to shadow mode. They log what
-   they would do, but do not take live action until the configured shadow window
-   has passed.
-4. **View rules + log**: moderators can inspect active and draft rules, recent
-   shadow decisions, live actions, and potential multi-rule conflicts.
-5. **Manage rules**: moderators can activate, pause, or delete rules per rule.
-6. **Undo this action**: when vibe-mod acts on a post or comment, the item menu
-   exposes a rollback action for 30 days.
+vibe-mod is a Devvit mod tool that turns a moderator's plain-language rule into
+a validated subreddit rule. A moderator can type something like "send links from
+accounts under 7 days old to the mod queue," preview what it would catch, save
+it as a draft, and let it run in shadow mode before it takes real action.
 
-Safety controls are built in: a subreddit-level dry-run-only switch, a max
-actions per hour circuit breaker, 50 compiles per day per subreddit, Devvit
-Redis audit storage, and guarded actions. The model can emit report, flair,
-lock, modqueue, and remove by default; ban, mute, permaban, and approve require
-explicit moderator opt-in.
+The AI runs only when a moderator clicks Compile. After that, the saved rule
+runs as deterministic TypeScript with **$0 per-post AI cost**. The model never
+reads subreddit posts, comments, usernames, or community history. It only sees
+the rule sentence the moderator typed.
 
-## How We Built It
+The moderator experience is:
 
-vibe-mod is a server-only Devvit Web app. `devvit.json` declares the server
-bundle, moderator menu items, form endpoints, post/comment/report/flair-update
-triggers, scheduler tasks, Devvit Redis, Reddit moderator permissions, and the
-single outbound HTTP domain: `api.openai.com`.
+- **Compose rule**: write the rule in normal language.
+- **Compile + Preview**: vibe-mod validates the compiled rule and shows what it
+  would do before anything happens.
+- **Shadow first**: new rules log decisions before going live.
+- **Manage rules**: pause, activate, delete, and inspect active or draft rules.
+- **Undo this action**: every live action keeps a 30-day rollback path.
 
-The core architecture is:
+Subreddit moderators do not need an OpenAI key or billing account. vibe-mod
+covers AI compilation up to a daily quota, then enforces saved rules without
+model calls.
+
+## How we built it
+
+vibe-mod is a server-only Reddit Devvit app built with TypeScript. Devvit
+handles the moderator menu actions, form submissions, post/comment/report
+triggers, scheduled jobs, permissions, and subreddit-scoped Redis storage.
+
+There are two main paths:
 
 - **Compile path**: moderator sentence -> OpenAI gpt-5.4-mini -> strict JSON
   rule -> Zod parse -> action whitelist -> draft rule in Devvit Redis.
 - **Runtime path**: Devvit trigger -> fact bag -> deterministic evaluator ->
-  shadow log or live action -> rollback token and audit entry.
-- **Schedulers**: audit retention, dry-run replay, shadow promotion checks, and
-  rate-limit circuit breaker.
+  shadow log or live action -> audit entry and rollback token.
 
 The rule evaluator is intentionally pure TypeScript. It evaluates a closed set
 of facts from the Reddit item, author context, and subreddit-scoped state. It
-does not call OpenAI, perform network I/O, or make stochastic decisions. This is
+does not call OpenAI, perform network I/O, or make stochastic decisions. That is
 the core guarantee: AI helps author the rule; deterministic code applies it.
 
-Testing had to compensate for the lack of a full local Devvit runtime. The repo
-uses Vitest route tests against `app.fetch()`, an in-memory Devvit-style test
-setup, property-style checks around the schema and evaluator, the official
-`@devvit/test` harness, and an acceptance script that checks Devvit config,
-route wiring, compiler/schema sync, rollback support, scheduler wiring, starter
-rules, and ToS/Privacy presence. CI runs lint, format check, typecheck,
-coverage tests, `@devvit/test`, acceptance, Vite build, and a server-bundle load
-smoke test.
+We also built the boring parts that make the idea usable: strict schema
+validation, guarded moderation actions, a subreddit-level dry-run switch, action
+rate limits, audit entries, rollback tokens, scheduler checks, starter rules,
+Terms and Privacy docs, and CI.
 
-Current evidence:
+## Challenges we ran into
 
-- Public App Directory listing: https://developers.reddit.com/apps/vibe-mod
-- Public GitHub repo: https://github.com/Two-Weeks-Team/vibe-mod
-- MIT license file in repo
-- CI green on `main`
-- 236 tests passing, 1 skipped
-- Coverage: 86.31% statements, 87.96% lines
-- App icon compressed under Devvit's 500 KB limit
+The hardest decision was saying no to the obvious AI bot. It would have been
+flashier to call a model on every post, but moderators need consistency,
+privacy, and predictable cost. A model that reads every submission is expensive
+and hard to audit. A compiled rule is cheaper, repeatable, and easier to
+explain.
 
-## Challenges We Ran Into
-
-The biggest design challenge was keeping the AI boundary honest. A generic AI
-moderation bot would be easier to describe but harder to trust: it would need
-to read community content and make a judgment on every post. vibe-mod takes the
-opposite approach. The model only translates the moderator's typed sentence, and
-the rest of the system is deterministic.
-
-That meant the schema had to be strict, the prompt had to stay aligned with the
-schema, and invalid output had to fail closed. The action whitelist is separate
-from the schema so a parsed rule still has to pass a policy gate before it can
-be stored. Ambiguity is handled as a product path: ask a clarifying question
-instead of guessing.
+That choice made the implementation stricter. Model output has to pass a Zod
+schema, then pass an action whitelist, then be stored as a draft. If the request
+is ambiguous, vibe-mod asks a clarifying question instead of guessing. If a rule
+would use guarded actions like ban, mute, permaban, or approve, the moderator has
+to opt in explicitly.
 
 Devvit also shaped the implementation. The app had to fit Devvit's permission,
 settings, Redis, scheduler, and server-bundle model. We added a doctor script to
@@ -170,55 +142,48 @@ management as a developer-owned encrypted global setting so subreddit
 moderators do not need to bring keys or billing.
 
 Finally, multi-rule behavior required an honest scope decision. The current app
-executes every matching rule in order, but repo HEAD also surfaces a read-only
-potential conflict preview in the dashboard. It warns moderators about likely
-collisions without pretending to solve full predicate satisfiability or runtime
-arbitration.
+executes every matching rule in order, but it also surfaces potential conflict
+warnings in the dashboard. That tells moderators where rules may collide without
+pretending the app can solve every policy question automatically.
 
-## Accomplishments We're Proud Of
+## Accomplishments that we're proud of
 
-- **AI as a compiler, not a judge**: the model never reads Reddit content and
-  never runs per post.
-- **Deterministic hot path**: runtime moderation is repeatable TypeScript logic,
-  not inference.
-- **Safety by default**: dry-run preview, shadow mode, guarded actions, action
-  rate limit, audit log, and 30-day undo.
-- **Moderator-first install story**: no OpenAI key and no billing for
-  subreddit moderators; vibe-mod covers compile cost with a daily quota.
-- **Real Devvit distribution**: the app is listed on the Reddit App Directory.
-- **Strong verification**: CI covers lint, formatting, strict TypeScript,
-  coverage tests, Devvit harness tests, acceptance gates, build, and bundle
-  smoke loading.
-- **Clean public package**: README, architecture notes, developer guide, ToS,
-  Privacy Policy, MIT license, banner, icon, and product landing page are all
-  available.
+- vibe-mod is live in the Reddit App Directory.
+- The model is used as a rule compiler, not a content judge.
+- Runtime moderation has **$0 per-post AI cost**.
+- New rules get preview and shadow mode before live action.
+- Every action has a 30-day undo path.
+- Guarded actions require explicit moderator opt-in.
+- Subreddit moderators do not need their own OpenAI key or billing account.
+- The public repo includes README, architecture notes, developer docs, Terms,
+  Privacy Policy, MIT license, icon, thumbnail, and landing page.
+- The current suite has 236 passing tests, 1 skipped test, CI, Devvit harness
+  checks, acceptance gates, build checks, and server-bundle smoke loading.
 
-## What We Learned
+## What we learned
 
 The safest use of AI in moderation is to narrow its job. A language model is
-useful for translating intent into a structured rule, but the actual moderation
-decision should be deterministic, inspectable, and reversible.
+useful for translating moderator intent into structure. It should not be the
+thing making live moderation decisions on every post.
 
-We also learned that trust features are not secondary polish. Shadow mode,
-preview, audit logs, rate limits, and undo are what make a natural-language rule
-tool usable by real moderators. Without those controls, "write rules in English"
-would be convenient but dangerous.
+We also learned that trust features are not polish. Preview, shadow mode, audit
+logs, rate limits, guarded actions, and undo are what make natural-language
+moderation usable by real mod teams. Without those controls, "say the rule"
+would be convenient but risky.
 
 On the platform side, Devvit rewards small, explicit systems. Declaring exact
 permissions, keeping state in subreddit-scoped Redis, and proving route/config
 parity made the app easier to review and easier to explain.
 
-## What's Next
+## What's next
 
-The next version should expand the fact layer while keeping the deterministic
-model intact. Useful additions include more account-history signals, richer
-link/domain patterns, repost indicators, edited-content facts, and better
-language signals.
+Next, we want to add richer rule signals while keeping the deterministic model
+intact: more account-history facts, richer link/domain patterns, repost
+indicators, edited-content facts, and better language signals.
 
-We also want to deepen rule management: conflict warnings during compose, an
-explicit promotion gate for high-risk conflicts, rule import/export between
-subreddits, and a richer dashboard with hit-rate history and false-positive
-annotations.
+We also want to make rule management stronger: conflict warnings during compose,
+an explicit promotion gate for high-risk conflicts, rule import/export between
+subreddits, and a dashboard with hit-rate history and false-positive notes.
 
 Longer term, vibe-mod can become a migration path from hand-written
 AutoModerator configs: read an existing AutoMod rule, translate it into
