@@ -1,4 +1,4 @@
-# vibe-mod - AI Rule Factory for Reddit Mods
+# vibe-mod - Say It, Ship Subreddit Rules
 
 Generated: 2026-05-26 KST  
 Hackathon: Reddit Mod Tools and Migrated Apps Hackathon  
@@ -14,16 +14,16 @@ GitHub repo and landing page.
 
 ### Project Name
 
-vibe-mod - AI Rule Factory for Reddit Mods
+vibe-mod - Say It, Ship Subreddit Rules
 
 Use the full name above in Devpost's **Project name** field. It stays within
 the 60-character limit while making the core wow point visible before judges
 open the project page.
 
-### Tagline
+### Elevator Pitch
 
-AI rule factory for Reddit mods: write a rule in plain English, compile it once,
-run deterministic TypeScript, shadow first, and keep 30-day undo.
+Say the rule. Ship safe subreddit moderation. vibe-mod covers AI compile cost,
+then runs deterministic checks with $0 per-post AI cost and 30-day undo.
 
 ### Category
 
@@ -51,12 +51,13 @@ Vitest, @devvit/test, GitHub Actions
 
 ## Summary
 
-vibe-mod is an AI rule factory for Reddit moderators. A moderator types a rule
-in plain English, such as "send links from accounts under 7 days old to the mod
-queue," and vibe-mod turns it into a validated, deterministic moderation rule.
-The AI is used only when the moderator writes the rule. Once the rule is saved,
-every post and comment is evaluated by plain TypeScript: no model call, no
-network call, no per-post token cost, and no Reddit content sent to the model.
+vibe-mod lets Reddit moderators say the rule they want and ship it as safe
+subreddit moderation. A moderator types a rule in plain English, such as "send
+links from accounts under 7 days old to the mod queue," and vibe-mod turns it
+into a validated, deterministic moderation rule. Moderators do not need an
+OpenAI key or billing account: vibe-mod covers AI compilation up to the daily
+quota, then every saved rule runs as plain TypeScript with $0 per-post AI cost,
+no model call, no network call, and no Reddit content sent to the model.
 
 The product is built around trust. Every new rule starts in dry-run/shadow mode,
 the moderator sees a preview before activation, live actions are capped by a
