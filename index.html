@@ -1159,18 +1159,24 @@ table.cmp caption { text-align: left; }
   border-top: 1px solid var(--rule);
   padding-block: 1.75rem;
   display: flex;
-  flex-wrap: wrap;
-  gap: 1rem 2rem;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 0.9rem;
   font-family: var(--mono);
   font-size: var(--step--1);
   color: var(--ink-faint);
+}
+.colophon-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 2rem;
+  align-items: baseline;
+  justify-content: space-between;
 }
 .colophon .set { display: flex; flex-wrap: wrap; gap: 0.85rem 1.5rem; align-items: baseline; }
 .colophon a { color: var(--ink-faint); text-decoration: none; border-bottom: 1px solid var(--rule); transition: color 0.15s, border-color 0.15s; }
 .colophon a:hover { color: var(--accent); border-color: var(--accent); }
 .colophon .mark { color: var(--ink-soft); }
+.colophon-fine { font-size: 0.64rem; letter-spacing: 0.02em; color: color-mix(in oklch, var(--ink-faint) 78%, transparent); }
 
 /* ============================================================
    PAGE-LOAD REVEAL — staggered, transform/opacity only
@@ -1206,7 +1212,7 @@ table.cmp caption { text-align: left; }
 <!-- ===================== MASTHEAD ===================== -->
 <header class="shell masthead">
   <a class="wordmark" href="#top"><span class="glyph" aria-hidden="true"></span>vibe&#8209;mod</a>
-  <span class="masthead-meta">A field guide to deterministic moderation &middot; rev. 0.0.50</span>
+  <span class="masthead-meta">A field guide to deterministic moderation &middot; built on Reddit Devvit</span>
 </header>
 
 <main id="top">
@@ -1666,13 +1672,22 @@ table.cmp caption { text-align: left; }
   </div>
 
   <div class="shell colophon">
-    <span class="mark"><span style="color:var(--accent)">&diams;</span> vibe-mod &middot; deterministic Reddit moderation</span>
-    <span class="set">
-      <a href="https://developers.reddit.com/apps/vibe-mod">developers.reddit.com/apps/vibe-mod</a>
-      <span>0 AI / post</span>
-      <span>free for mods</span>
-      <span>30-day undo</span>
-    </span>
+    <div class="colophon-row">
+      <span class="mark"><span style="color:var(--accent)">&diams;</span> vibe-mod &middot; deterministic Reddit moderation</span>
+      <span class="set">
+        <a href="https://developers.reddit.com/apps/vibe-mod">App Directory</a>
+        <a href="https://github.com/Two-Weeks-Team/vibe-mod">GitHub</a>
+        <a href="https://github.com/Two-Weeks-Team/vibe-mod/blob/main/LICENSE">MIT</a>
+      </span>
+    </div>
+    <div class="colophon-row colophon-fine">
+      <span>Not affiliated with or endorsed by Reddit, Inc.</span>
+      <span class="set">
+        <span>0 AI / post</span>
+        <span>free for mods</span>
+        <span>30-day undo</span>
+      </span>
+    </div>
   </div>
 </footer>
 
