@@ -996,6 +996,52 @@ table.cmp caption { text-align: left; }
 .cmp .yes { color: var(--accent-deep); }
 .cmp .no { color: var(--ink-faint); }
 .cmp .mono-cell { font-family: var(--mono); font-size: 0.92em; }
+/* mobile/tablet: reflow the table into stacked cards instead of scrolling */
+@media (max-width: 760px) {
+  .cmp-wrap { overflow: visible; margin-inline: 0; padding-inline: 0; }
+  table.cmp { display: block; min-width: 0; width: 100%; font-size: var(--step-0); }
+  .cmp colgroup, .cmp thead { display: none; }
+  .cmp tbody { display: block; }
+  .cmp tbody tr {
+    display: block;
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 0.4rem 1.1rem 0.85rem;
+    margin-bottom: 1rem;
+  }
+  .cmp tbody th {
+    display: block;
+    text-align: left;
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: var(--step-0);
+    color: var(--ink);
+    padding: 0.7rem 0 0.55rem;
+    margin-bottom: 0.4rem;
+    border-bottom: 1px solid var(--rule-strong);
+  }
+  .cmp tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1.25rem;
+    text-align: right;
+    padding: 0.45rem 0;
+    border: 0;
+    background: none;
+  }
+  .cmp tbody td::before {
+    content: attr(data-label);
+    flex: none;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+  }
+  .cmp tbody td.us-col-cell { font-weight: 600; color: var(--ink); }
+  .cmp tbody td.us-col-cell::before { color: var(--accent); }
+}
 
 /* verifiable numbers — a spec ledger, not a metric grid.
    Each line: mono slug · serif value · run-in description. */
@@ -1584,39 +1630,39 @@ table.cmp caption { text-align: left; }
         <tbody>
           <tr>
             <th scope="row">Author rules in</th>
-            <td class="us-col-cell">plain English</td>
-            <td class="mono-cell">YAML / regex</td>
-            <td>plain English</td>
+            <td class="us-col-cell" data-label="vibe-mod">plain English</td>
+            <td class="mono-cell" data-label="AutoModerator">YAML / regex</td>
+            <td data-label="Generic AI bot">plain English</td>
           </tr>
           <tr>
             <th scope="row">Read the final rule</th>
-            <td class="us-col-cell"><span class="yes">yes</span> &mdash; deterministic</td>
-            <td>yes, if you know YAML</td>
-            <td><span class="no">no</span> &mdash; black box</td>
+            <td class="us-col-cell" data-label="vibe-mod"><span class="yes">yes</span> &mdash; deterministic</td>
+            <td data-label="AutoModerator">yes, if you know YAML</td>
+            <td data-label="Generic AI bot"><span class="no">no</span> &mdash; black box</td>
           </tr>
           <tr>
             <th scope="row">AI calls per post at runtime</th>
-            <td class="us-col-cell"><span class="big0">0</span></td>
-            <td>0</td>
-            <td>1 &mdash; every post</td>
+            <td class="us-col-cell" data-label="vibe-mod"><span class="big0">0</span></td>
+            <td data-label="AutoModerator">0</td>
+            <td data-label="Generic AI bot">1 &mdash; every post</td>
           </tr>
           <tr>
             <th scope="row">Preview before it acts</th>
-            <td class="us-col-cell"><span class="yes">dry-run + 24h shadow</span></td>
-            <td class="no">no</td>
-            <td class="no">rarely</td>
+            <td class="us-col-cell" data-label="vibe-mod"><span class="yes">dry-run + 24h shadow</span></td>
+            <td class="no" data-label="AutoModerator">no</td>
+            <td class="no" data-label="Generic AI bot">rarely</td>
           </tr>
           <tr>
             <th scope="row">Every action reversible</th>
-            <td class="us-col-cell"><span class="yes">30-day 1-click undo</span></td>
-            <td>manual</td>
-            <td>manual</td>
+            <td class="us-col-cell" data-label="vibe-mod"><span class="yes">30-day 1-click undo</span></td>
+            <td data-label="AutoModerator">manual</td>
+            <td data-label="Generic AI bot">manual</td>
           </tr>
           <tr>
             <th scope="row">Audit log</th>
-            <td class="us-col-cell"><span class="yes">yes</span></td>
-            <td>partial</td>
-            <td class="no">usually no</td>
+            <td class="us-col-cell" data-label="vibe-mod"><span class="yes">yes</span></td>
+            <td data-label="AutoModerator">partial</td>
+            <td class="no" data-label="Generic AI bot">usually no</td>
           </tr>
         </tbody>
       </table>
