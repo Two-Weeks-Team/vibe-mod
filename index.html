@@ -859,48 +859,70 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
 /* ============================================================
    IN ACTION — video + result
    ============================================================ */
-.action-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.85fr);
-  gap: clamp(1.75rem, 4vw, 3rem);
-  align-items: start;
+/* full-bleed looping demo with the explanation overlaid on the right */
+.action-stage { margin: 0; }
+.video-frame {
+  position: relative;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--ink);
+  box-shadow: 0 1px 0 var(--rule), 0 26px 60px -34px color-mix(in oklch, var(--ink) 55%, transparent);
 }
-@media (max-width: 920px) { .action-grid { grid-template-columns: 1fr; gap: 2.25rem; } }
-
-.video-frame { border: 1px solid var(--rule-strong); border-radius: 5px; overflow: hidden; background: var(--ink); box-shadow: 0 1px 0 var(--rule), 0 22px 50px -30px color-mix(in oklch, var(--ink) 55%, transparent); }
-.video-frame .frame-bar { background: var(--paper); }
-.video-frame video {
+.video-frame .frame-bar { background: var(--paper); position: relative; z-index: 2; }
+.video-stage { position: relative; }
+.video-stage video {
   display: block;
   width: 100%;
   height: auto;
   aspect-ratio: 16 / 9;
   background: var(--ink);
 }
-.action-side h2 {
+.action-overlay {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: clamp(18rem, 37%, 26rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(1.4rem, 2.8vw, 2.4rem);
+  background: color-mix(in oklch, var(--paper) 84%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.05);
+  backdrop-filter: blur(14px) saturate(1.05);
+  border-left: 1px solid color-mix(in oklch, var(--ink) 12%, transparent);
+}
+.action-overlay h2 {
+  font-family: var(--serif);
   font-size: var(--step-2);
   font-weight: 500;
   letter-spacing: -0.015em;
   line-height: 1.06;
-  margin-bottom: 1rem;
-  max-width: 16ch;
+  margin: 0 0 0.7rem;
+  color: var(--ink);
 }
-.action-side p { color: var(--ink-soft); font-size: var(--step-0); }
+.action-overlay h2 em { font-style: italic; color: var(--accent); }
+.action-overlay p { color: var(--ink-soft); font-size: var(--step-0); line-height: 1.5; margin: 0 0 1.25rem; }
 .action-flow {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  margin: 1.4rem 0;
+  gap: 0.5rem;
   font-family: var(--mono);
   font-size: var(--step--1);
 }
-.action-flow .row {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  color: var(--ink);
-}
+.action-flow .row { display: flex; align-items: center; gap: 0.7rem; color: var(--ink); }
 .action-flow .row .ix { color: var(--accent); font-weight: 600; flex: none; width: 1.5rem; }
 .action-flow .row .arr { color: var(--ink-faint); }
+@media (max-width: 760px) {
+  .action-overlay {
+    position: static;
+    width: auto;
+    background: var(--paper-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-left: none;
+    border-top: 1px solid var(--rule);
+  }
+}
 
 /* ============================================================
    WHY TRUST IT — comparison table
@@ -1406,12 +1428,12 @@ table.cmp caption { text-align: left; }
       <span class="sec-rule" aria-hidden="true"></span>
     </div>
 
-    <div class="action-grid">
-      <figure>
-        <div class="video-frame">
-          <div class="frame-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="addr">demo &mdash; flair &rarr; remove + lock &middot; 0:22</span></div>
+    <figure class="action-stage">
+      <div class="video-frame">
+        <div class="frame-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="addr">demo &mdash; flair &rarr; remove + lock &middot; 0:22</span></div>
+        <div class="video-stage">
           <video
-            controls
+            autoplay
             muted
             loop
             playsinline
@@ -1423,29 +1445,21 @@ table.cmp caption { text-align: left; }
             Your browser doesn&rsquo;t support embedded video. The clip shows a moderator applying the
             &ldquo;Spam&rdquo; flair to a post, after which vibe-mod removes and locks it.
           </video>
-        </div>
-        <figcaption><b>22-second demo.</b> A mod applies the &ldquo;Spam&rdquo; flair on r/SocialSeeding &mdash; vibe-mod reacts in real time. Muted; press play.</figcaption>
-      </figure>
-
-      <div class="action-side">
-        <h2>Flair it &ldquo;Spam.&rdquo; <em>It&rsquo;s gone.</em></h2>
-        <p class="prose">vibe-mod reacts to mod actions, not just new posts. One flair triggers a deterministic chain&#8202;&mdash;&#8202;no second click, no waiting on a model.</p>
-        <div class="action-flow" aria-hidden="true">
-          <span class="row"><span class="ix">01</span> mod applies <b>&ldquo;Spam&rdquo;</b> flair</span>
-          <span class="row"><span class="arr">&darr;</span></span>
-          <span class="row"><span class="ix">02</span> rule fires <b>on flairUpdate</b></span>
-          <span class="row"><span class="arr">&darr;</span></span>
-          <span class="row"><span class="ix">03</span> post is <b>removed + locked</b></span>
-        </div>
-        <figure style="margin-top:1.75rem">
-          <div class="ui-frame is-landscape">
-            <img src="assets/ui-removed-locked.png" width="1040" height="376" loading="lazy" decoding="async"
-              alt="A post flaired Spam, now removed and locked, with a notice that the post is locked and new comments cannot be posted." />
+          <div class="action-overlay">
+            <h2>Flair it &ldquo;Spam.&rdquo; <em>It&rsquo;s gone.</em></h2>
+            <p>vibe-mod reacts to mod actions, not just new posts. One flair triggers a deterministic chain&#8202;&mdash;&#8202;no second click, no waiting on a model.</p>
+            <div class="action-flow" aria-hidden="true">
+              <span class="row"><span class="ix">01</span> mod applies <b>&ldquo;Spam&rdquo;</b> flair</span>
+              <span class="row"><span class="arr">&darr;</span></span>
+              <span class="row"><span class="ix">02</span> rule fires <b>on flairUpdate</b></span>
+              <span class="row"><span class="arr">&darr;</span></span>
+              <span class="row"><span class="ix">03</span> post is <b>removed + locked</b></span>
+            </div>
           </div>
-          <figcaption><b>The result.</b> Removed and locked &mdash; logged, and reversible for 30 days.</figcaption>
-        </figure>
+        </div>
       </div>
-    </div>
+      <figcaption><b>22-second demo.</b> A mod applies the &ldquo;Spam&rdquo; flair on r/SocialSeeding &mdash; vibe-mod removes and locks the post in real time. Loops automatically, muted.</figcaption>
+    </figure>
   </section>
 
   <!-- ===================== 06 — WHY TRUST IT ===================== -->
