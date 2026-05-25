@@ -881,16 +881,16 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
 .action-overlay {
   position: absolute;
   top: 0; right: 0; bottom: 0;
-  width: clamp(18rem, 37%, 26rem);
+  width: clamp(16rem, 31%, 21rem);
   display: flex;
   flex-direction: column;
   justify-content: center;
   padding: clamp(1.4rem, 2.8vw, 2.4rem);
   /* glassmorphism: see the video through a frosted pane */
-  background: color-mix(in oklch, var(--paper) 52%, transparent);
-  -webkit-backdrop-filter: blur(20px) saturate(1.25);
-  backdrop-filter: blur(20px) saturate(1.25);
-  border-left: 1px solid color-mix(in oklch, white 45%, transparent);
+  background: color-mix(in oklch, var(--paper) 34%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  backdrop-filter: blur(18px) saturate(1.3);
+  border-left: 1px solid color-mix(in oklch, white 50%, transparent);
   box-shadow: -22px 0 40px -30px color-mix(in oklch, var(--ink) 60%, transparent);
 }
 .action-overlay h2,
