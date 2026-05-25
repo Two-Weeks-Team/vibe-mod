@@ -445,6 +445,7 @@ strong, b { font-weight: 600; color: var(--ink); }
 @media (max-width: 880px) {
   .problem-grid { grid-template-columns: 1fr; gap: 2.5rem; }
 }
+.problem-lead .pullquote { margin-top: clamp(1.9rem, 4vw, 3rem); }
 
 .options { display: grid; gap: 1.6rem; }
 .option {
@@ -1122,7 +1123,13 @@ table.cmp caption { text-align: left; }
     </div>
 
     <div class="problem-grid">
-      <p class="lede">Moderating a subreddit means writing rules. Today a mod has two bad options.</p>
+      <div class="problem-lead">
+        <p class="lede">Moderating a subreddit means writing rules. Today a mod has two bad options.</p>
+        <blockquote class="pullquote reveal">
+          <p>Moderators want to <em>say what they mean</em>, in their own words&#8202;&mdash;&#8202;and trust exactly what will happen.</p>
+          <cite>&mdash; what mods actually ask for</cite>
+        </blockquote>
+      </div>
 
       <div class="options">
         <article class="option">
@@ -1149,11 +1156,6 @@ table.cmp caption { text-align: left; }
         </article>
       </div>
     </div>
-
-    <blockquote class="pullquote reveal" style="margin-top: clamp(2.5rem,5vw,4rem)">
-      <p>Moderators want to <em>say what they mean</em>, in their own words&#8202;&mdash;&#8202;and trust exactly what will happen.</p>
-      <cite>&mdash; what mods actually ask for</cite>
-    </blockquote>
   </section>
 
   <!-- ===================== 02 — OUR SOLUTION ===================== -->
