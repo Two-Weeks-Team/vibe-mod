@@ -1126,11 +1126,12 @@ table.cmp caption { text-align: left; }
 @media (prefers-reduced-motion: no-preference) and (min-width: 761px) {
   .action-overlay {
     transform: translateX(-104%);
-    transition: transform 0.85s cubic-bezier(0.16, 1, 0.3, 1);
-    transition-delay: 0.45s;
+    transition: transform 0.82s cubic-bezier(0.16, 1, 0.3, 1);
     will-change: transform;
   }
   .is-in .action-overlay { transform: translateX(0); }
+  /* JS toggles .replaying at each video loop to re-run the slide */
+  .is-in .action-overlay.replaying { transform: translateX(-104%); }
 }
 </style>
 </head>
@@ -1698,6 +1699,31 @@ table.cmp caption { text-align: left; }
       });
     }
     setTimeout(cycle, 650);
+  })();
+
+  // In-Action overlay: re-run the left->right slide each time the demo loops,
+  // so it keeps reading as a pane over the (looping) background video.
+  (function () {
+    var overlay = document.querySelector('.action-overlay');
+    var stage = document.querySelector('.action-stage');
+    if (!overlay || !stage) return;
+    var video = stage.querySelector('video');
+    if (!video) return;
+    var mm = window.matchMedia;
+    if (mm && (mm('(prefers-reduced-motion: reduce)').matches || mm('(max-width: 760px)').matches)) return;
+    var section = overlay.closest('section');
+    var last = 0, busy = false;
+    video.addEventListener('timeupdate', function () {
+      var t = video.currentTime || 0;
+      // currentTime jumping backwards = the loop restarted
+      if (t + 0.08 < last && !busy && section && section.classList.contains('is-in')) {
+        busy = true;
+        overlay.classList.add('replaying');                                  // slide out (reveals the fresh loop)
+        setTimeout(function () { overlay.classList.remove('replaying'); }, 740); // slide back in
+        setTimeout(function () { busy = false; }, 1700);
+      }
+      last = t;
+    });
   })();
 </script>
 
