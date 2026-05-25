@@ -886,11 +886,16 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
   flex-direction: column;
   justify-content: center;
   padding: clamp(1.4rem, 2.8vw, 2.4rem);
-  background: color-mix(in oklch, var(--paper) 84%, transparent);
-  -webkit-backdrop-filter: blur(14px) saturate(1.05);
-  backdrop-filter: blur(14px) saturate(1.05);
-  border-left: 1px solid color-mix(in oklch, var(--ink) 12%, transparent);
+  /* glassmorphism: see the video through a frosted pane */
+  background: color-mix(in oklch, var(--paper) 52%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.25);
+  backdrop-filter: blur(20px) saturate(1.25);
+  border-left: 1px solid color-mix(in oklch, white 45%, transparent);
+  box-shadow: -22px 0 40px -30px color-mix(in oklch, var(--ink) 60%, transparent);
 }
+.action-overlay h2,
+.action-overlay p,
+.action-overlay .action-flow { position: relative; }
 .action-overlay h2 {
   font-family: var(--serif);
   font-size: var(--step-2);
