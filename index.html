@@ -360,6 +360,35 @@ strong, b { font-weight: 600; color: var(--ink); }
 }
 .compiler-foot b { color: var(--ink-soft); font-weight: 500; }
 
+/* Live typing + rolling examples (JS adds .is-live on .compiler; static fallback otherwise) */
+.compiler-in { min-height: 2.6em; }
+.compiler-out { min-height: 3.4em; }
+.compiler.is-live .compiler-in::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.16em;
+  background: var(--accent);
+  animation: caretBlink 1.05s steps(1) infinite;
+}
+.compiler.is-live .compiler-out {
+  transition: opacity 0.32s ease, transform 0.32s ease;
+}
+.compiler.is-live .compiler-out.is-hiding {
+  opacity: 0;
+  transform: translateY(6px);
+}
+@keyframes caretBlink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .compiler.is-live .compiler-in::after { animation: none; }
+  .compiler.is-live .compiler-out { transition: none; }
+}
+
 /* CTA buttons */
 .cta-row {
   display: flex;
@@ -1539,6 +1568,72 @@ table.cmp caption { text-align: left; }
       // Skip ones already revealed in the hero.
       if (!el.closest('.hero')) io.observe(el);
     });
+  })();
+
+  // Hero compiler — type a plain-English rule, then reveal the predicate it
+  // compiles into; roll through examples a subreddit mod actually cares about.
+  // Static (first example) under prefers-reduced-motion.
+  (function () {
+    var inEl = document.querySelector('.compiler-in');
+    var outEl = document.querySelector('.compiler-out');
+    var fig = document.querySelector('.compiler');
+    if (!inEl || !outEl || !fig) return;
+
+    var examples = [
+      { t: 'Send brand-new accounts’ short posts to the mod queue.',
+        o: '<span class="tok">author.accountAgeHours</span> <span class="op">lt</span> 24 <span class="op">∧</span> <span class="tok">content.wordCount</span> <span class="op">lt</span> 40 <span class="op">→</span> <span class="act">modqueue</span>' },
+      { t: 'When the “Spam” flair is applied, remove the post and lock it.',
+        o: '<span class="op">on</span> flairUpdate <span class="op">·</span> <span class="tok">post.flairText</span> <span class="op">eq</span> ‘Spam’ <span class="op">→</span> <span class="act">remove + lock</span>' },
+      { t: 'Send titles that are mostly in CAPS to the mod queue.',
+        o: '<span class="tok">content.title.upperCaseRatio</span> <span class="op">gt</span> 0.7 <span class="op">→</span> <span class="act">modqueue</span>' },
+      { t: 'Remove posts with more than 3 links in the body.',
+        o: '<span class="tok">content.linkCount</span> <span class="op">gt</span> 3 <span class="op">→</span> <span class="act">remove</span>' },
+      { t: 'Remove NSFW posts not tagged with the NSFW flair.',
+        o: '<span class="tok">content.over18</span> <span class="op">eq</span> true <span class="op">∧ NOT</span> <span class="tok">post.flair</span> nsfw <span class="op">→</span> <span class="act">remove</span>' },
+      { t: 'Send posts from users without a verified email to the mod queue.',
+        o: '<span class="tok">author.hasVerifiedEmail</span> <span class="op">eq</span> false <span class="op">→</span> <span class="act">modqueue</span>' }
+    ];
+
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) {
+      inEl.textContent = '“' + examples[0].t + '”';
+      outEl.innerHTML = examples[0].o;
+      return;
+    }
+
+    fig.classList.add('is-live');
+    inEl.textContent = '';
+    outEl.classList.add('is-hiding');
+    var i = 0;
+
+    function type(full, done) {
+      var n = 0;
+      (function step() {
+        inEl.textContent = full.slice(0, n);
+        if (n++ < full.length) setTimeout(step, 26 + Math.random() * 46);
+        else done();
+      })();
+    }
+    function erase(done) {
+      var cur = inEl.textContent, n = cur.length;
+      (function step() {
+        inEl.textContent = cur.slice(0, n);
+        if (n-- > 0) setTimeout(step, 11);
+        else done();
+      })();
+    }
+    function cycle() {
+      var ex = examples[i];
+      outEl.classList.add('is-hiding');
+      type('“' + ex.t + '”', function () {
+        outEl.innerHTML = ex.o;
+        setTimeout(function () { outEl.classList.remove('is-hiding'); }, 160);
+        setTimeout(function () {
+          erase(function () { i = (i + 1) % examples.length; cycle(); });
+        }, 2700);
+      });
+    }
+    setTimeout(cycle, 650);
   })();
 </script>
 
