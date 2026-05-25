@@ -600,8 +600,9 @@ strong, b { font-weight: 600; color: var(--ink); }
   display: grid;
   grid-template-columns: minmax(0, 0.62fr) minmax(0, 1.38fr);
   gap: clamp(1.5rem, 4vw, 3.5rem);
-  align-items: center;
+  align-items: start;
 }
+.step-text { padding-top: 0.4rem; }
 .step:nth-child(even) { direction: rtl; }
 .step:nth-child(even) > * { direction: ltr; }
 @media (max-width: 860px) {
@@ -743,9 +744,9 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
 }
 .pair {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.05fr);
+  grid-template-columns: minmax(0, 1.12fr) auto minmax(0, 1fr);
   gap: clamp(0.85rem, 2.5vw, 2rem);
-  align-items: center;
+  align-items: baseline;
   padding: clamp(0.95rem, 2vw, 1.3rem) 0;
   border-bottom: 1px solid var(--rule);
 }
@@ -763,7 +764,7 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
   color: var(--accent);
   font-family: var(--mono);
   font-size: 0.95rem;
-  align-self: center;
+  align-self: baseline;
   user-select: none;
 }
 .pair-out {
@@ -860,9 +861,14 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
 table.cmp {
   width: 100%;
   border-collapse: collapse;
-  min-width: 640px;
+  min-width: 680px;
+  table-layout: fixed;
   font-size: var(--step--1);
 }
+.cmp colgroup col:first-child { width: 28%; }
+.cmp colgroup col:nth-child(2),
+.cmp colgroup col:nth-child(3),
+.cmp colgroup col:nth-child(4) { width: 24%; }
 table.cmp caption { text-align: left; }
 .cmp th, .cmp td {
   text-align: left;
@@ -899,10 +905,9 @@ table.cmp caption { text-align: left; }
   font-weight: 600;
   color: var(--ink-soft);
   font-size: var(--step--1);
-  white-space: nowrap;
+  white-space: normal;
 }
 .cmp td { color: var(--ink-soft); }
-.cmp col.us-col { width: 1px; }
 .cmp .us-col-cell {
   background: var(--accent-tint);
   color: var(--ink);
@@ -1100,7 +1105,7 @@ table.cmp caption { text-align: left; }
           </div>
           <div class="compiler-foot">
             <span><b>0</b> AI / post</span>
-            <span><b>~$0.0003</b> / compile</span>
+            <span><b>free</b> for mods</span>
             <span><b>24h</b> shadow</span>
           </div>
         </div>
@@ -1536,7 +1541,7 @@ table.cmp caption { text-align: left; }
     <span class="set">
       <a href="https://developers.reddit.com/apps/vibe-mod">developers.reddit.com/apps/vibe-mod</a>
       <span>0 AI / post</span>
-      <span>~$0.0003 / compile</span>
+      <span>free for mods</span>
       <span>30-day undo</span>
     </span>
   </div>
